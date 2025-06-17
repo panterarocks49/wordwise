@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -34,26 +34,38 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isPreview, setIsPreview] = useState(false)
+  const isMountedRef = useRef(true)
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   // Auto-save functionality
   const saveDocument = useCallback(async () => {
-    if (isSaving) return
+    if (isSaving || !isMountedRef.current) return
 
     setIsSaving(true)
     try {
       await updateDocument(document.id, title, content)
-      setLastSaved(new Date())
+      if (isMountedRef.current) {
+        setLastSaved(new Date())
+      }
     } catch (error) {
       console.error("Failed to save document:", error)
     } finally {
-      setIsSaving(false)
+      if (isMountedRef.current) {
+        setIsSaving(false)
+      }
     }
   }, [document.id, title, content, isSaving])
 
   // Auto-save every 3 seconds when content changes
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (title !== document.title || content !== document.content) {
+      if ((title !== document.title || content !== document.content) && isMountedRef.current) {
         saveDocument()
       }
     }, 3000)
