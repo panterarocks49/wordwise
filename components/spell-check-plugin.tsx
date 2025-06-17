@@ -1,40 +1,42 @@
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import nspell from 'nspell'
 
 interface SpellCheckWrapperProps {
   content: string
   onChange: (content: string) => void
   children: React.ReactNode
+  onSpellCheckUpdate?: (data: {
+    isLoading: boolean
+    error: string | null
+    misspelledWords: MisspelledWord[]
+  }) => void
+  onIgnoreWord?: (word: string) => void
+  onWordReplace?: (originalWord: string, replacement: string) => void
 }
 
-interface MisspelledWord {
+export interface MisspelledWord {
   word: string
   suggestions: string[]
+  position?: number
 }
 
 export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({ 
   content, 
   onChange, 
-  children 
+  children,
+  onSpellCheckUpdate,
+  onIgnoreWord,
+  onWordReplace
 }) => {
   const [dictionary, setDictionary] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [misspelledWords, setMisspelledWords] = useState<MisspelledWord[]>([])
+  const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set())
 
-  useEffect(() => {
-    loadDictionary()
-  }, [])
-
-  useEffect(() => {
-    if (dictionary && content) {
-      checkSpelling(content)
-    }
-  }, [content, dictionary])
-
-  const loadDictionary = async () => {
+  const loadDictionary = useCallback(async () => {
     try {
       setIsLoading(true)
       setError(null)
@@ -63,9 +65,9 @@ export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({
       setError('Failed to load spell check dictionary')
       setIsLoading(false)
     }
-  }
+  }, [])
 
-  const extractTextForSpellCheck = (markdown: string): string => {
+  const extractTextForSpellCheck = useCallback((markdown: string): string => {
     return markdown
       .replace(/```[\s\S]*?```/g, '') // Remove code blocks
       .replace(/`[^`]*`/g, '') // Remove inline code
@@ -73,9 +75,9 @@ export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({
       .replace(/[#*_~]/g, '') // Remove markdown formatting
       .replace(/\n+/g, ' ') // Replace newlines with spaces
       .trim()
-  }
+  }, [])
 
-  const checkSpelling = (markdown: string) => {
+  const checkSpelling = useCallback((markdown: string) => {
     if (!dictionary) return
 
     const textContent = extractTextForSpellCheck(markdown)
@@ -83,7 +85,12 @@ export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({
     const misspelledMap = new Map<string, string[]>()
 
     for (const word of words) {
-      if (word.length > 2 && !dictionary.correct(word) && !misspelledMap.has(word.toLowerCase())) {
+      if (
+        word.length > 2 && 
+        !dictionary.correct(word) && 
+        !misspelledMap.has(word.toLowerCase()) &&
+        !ignoredWords.has(word.toLowerCase())
+      ) {
         misspelledMap.set(word.toLowerCase(), dictionary.suggest(word).slice(0, 5))
       }
     }
@@ -94,67 +101,47 @@ export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({
     }))
 
     setMisspelledWords(misspelled)
-  }
+  }, [dictionary, ignoredWords, extractTextForSpellCheck])
 
-  const SpellCheckStatus = () => {
-    if (isLoading) {
-      return (
-        <div className="spell-check-status p-2 text-sm border-b bg-blue-50">
-          <span className="text-blue-600">🔄 Loading spell check...</span>
-        </div>
-      )
+  useEffect(() => {
+    loadDictionary()
+  }, [loadDictionary])
+
+  useEffect(() => {
+    if (dictionary && content) {
+      checkSpelling(content)
     }
+  }, [content, dictionary, checkSpelling])
 
-    if (error) {
-      return (
-        <div className="spell-check-status p-2 text-sm border-b bg-red-50">
-          <span className="text-red-600">❌ {error}</span>
-        </div>
-      )
+  // Notify parent component of spell check updates
+  useEffect(() => {
+    if (onSpellCheckUpdate) {
+      onSpellCheckUpdate({
+        isLoading,
+        error,
+        misspelledWords
+      })
     }
+  }, [isLoading, error, misspelledWords, onSpellCheckUpdate])
 
-    const errorCount = misspelledWords.length
+  const handleWordReplace = useCallback((originalWord: string, replacement: string) => {
+    if (onWordReplace) {
+      onWordReplace(originalWord, replacement)
+    }
+  }, [onWordReplace])
 
-    return (
-      <div className="spell-check-status p-2 text-sm border-b bg-green-50">
-        <div className="flex items-center justify-between">
-          <span className="text-green-600">✅ Spell check active</span>
-          {errorCount > 0 && (
-            <span className="text-orange-600 font-medium">
-              {errorCount} spelling issue{errorCount !== 1 ? 's' : ''}
-            </span>
-          )}
-        </div>
-        
-        {errorCount > 0 && (
-          <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs">
-            <div className="font-medium text-orange-800 mb-1">Issues found:</div>
-            <div className="space-y-1">
-              {misspelledWords.slice(0, 5).map((item, index) => (
-                <div key={index} className="text-orange-700">
-                  <span className="font-medium">"{item.word}"</span>
-                  {item.suggestions.length > 0 && (
-                    <span className="text-orange-600 ml-2">
-                      → {item.suggestions.slice(0, 3).join(', ')}
-                    </span>
-                  )}
-                </div>
-              ))}
-              {errorCount > 5 && (
-                <div className="text-orange-600">
-                  ... and {errorCount - 5} more
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
+  const handleIgnoreWord = useCallback((word: string) => {
+    const newIgnoredWords = new Set(ignoredWords)
+    newIgnoredWords.add(word.toLowerCase())
+    setIgnoredWords(newIgnoredWords)
+    
+    if (onIgnoreWord) {
+      onIgnoreWord(word)
+    }
+  }, [ignoredWords, onIgnoreWord])
 
   return (
     <div className="spell-check-wrapper">
-      <SpellCheckStatus />
       {children}
     </div>
   )

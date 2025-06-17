@@ -16,6 +16,12 @@ interface DocumentStore {
   error: string | null
   currentUserId: string | null
   
+  // Current document state
+  currentDocument: Document | null
+  currentTitle: string
+  currentContent: string
+  contentChangeCount: number // Track external content changes
+  
   // Actions
   fetchDocuments: () => Promise<void>
   addDocument: () => Promise<void>
@@ -26,6 +32,13 @@ interface DocumentStore {
   setError: (error: string | null) => void
   clearStore: () => void
   setCurrentUserId: (userId: string | null) => void
+  
+  // Current document actions
+  setCurrentDocument: (document: Document) => void
+  updateCurrentTitle: (title: string) => void
+  updateCurrentContent: (content: string) => void
+  replaceWordInContent: (originalWord: string, replacement: string) => void
+  clearCurrentDocument: () => void
 }
 
 export const useDocumentStore = create<DocumentStore>((set, get) => ({
@@ -33,6 +46,11 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   loading: false,
   error: null,
   currentUserId: null,
+
+  currentDocument: null,
+  currentTitle: '',
+  currentContent: '',
+  contentChangeCount: 0,
 
   fetchDocuments: async () => {
     const { loading } = get()
@@ -161,5 +179,42 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     } else {
       set({ currentUserId: userId })
     }
+  },
+
+  setCurrentDocument: (document: Document) => {
+    set({ currentDocument: document, currentTitle: document.title, currentContent: document.content })
+  },
+
+  updateCurrentTitle: (title: string) => {
+    set({ currentTitle: title })
+  },
+
+  updateCurrentContent: (content: string) => {
+    set({ currentContent: content })
+  },
+
+  replaceWordInContent: (originalWord: string, replacement: string) => {
+    const { currentContent, contentChangeCount } = get()
+    if (!currentContent) return
+    
+    console.log('Store: Replacing word:', originalWord, 'with:', replacement)
+    
+    // Create a regex to find the word with word boundaries
+    const regex = new RegExp(`\\b${originalWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
+    const updatedContent = currentContent.replace(regex, replacement)
+    
+    if (updatedContent !== currentContent) {
+      console.log('Store: Content updated with replacement')
+      set({ 
+        currentContent: updatedContent,
+        contentChangeCount: contentChangeCount + 1 // Increment to trigger reactivity
+      })
+    } else {
+      console.log('Store: No changes made - word not found')
+    }
+  },
+
+  clearCurrentDocument: () => {
+    set({ currentDocument: null, currentTitle: '', currentContent: '' })
   },
 })) 

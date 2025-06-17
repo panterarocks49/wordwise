@@ -12,6 +12,8 @@ import {
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
 import { useDocumentStore } from "@/lib/stores/document-store"
+import { SpellCheckWrapper, MisspelledWord } from "./spell-check-plugin"
+import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
 import dynamic from 'next/dynamic'
 import '@mdxeditor/editor/style.css'
@@ -30,13 +32,42 @@ interface DocumentEditorProps {
 }
 
 export default function DocumentEditor({ document }: DocumentEditorProps) {
-  const [title, setTitle] = useState(document.title)
-  const [content, setContent] = useState(document.content)
   const [isSaving, setIsSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null)
   const [isPreview, setIsPreview] = useState(false)
+  const [spellCheckSidebarOpen, setSpellCheckSidebarOpen] = useState(true)
+  const [spellCheckData, setSpellCheckData] = useState<{
+    isLoading: boolean
+    error: string | null
+    misspelledWords: MisspelledWord[]
+  }>({
+    isLoading: true,
+    error: null,
+    misspelledWords: []
+  })
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const { updateDocumentInStore } = useDocumentStore()
+  
+  const { 
+    updateDocumentInStore,
+    currentDocument,
+    currentTitle,
+    currentContent,
+    contentChangeCount,
+    setCurrentDocument,
+    updateCurrentTitle,
+    updateCurrentContent,
+    replaceWordInContent
+  } = useDocumentStore()
+
+  // Initialize the current document in the store
+  useEffect(() => {
+    const docWithUserId = { ...document, user_id: '' } // Add missing user_id field
+    setCurrentDocument(docWithUserId)
+  }, [document, setCurrentDocument])
+
+  // Use store values with fallbacks
+  const title = currentTitle || document.title
+  const content = currentContent || document.content
 
   // Simple save function
   const saveDocument = useCallback(async () => {
@@ -93,18 +124,39 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   }, [title, content, scheduleAutoSave])
 
   // Save on title blur
-  const handleTitleBlur = () => {
+  const handleTitleBlur = useCallback(() => {
     if (title !== document.title && !isSaving) {
       console.log('Saving due to title blur')
       saveDocument()
     }
-  }
+  }, [title, document.title, isSaving, saveDocument])
 
   // Manual save button
   const handleManualSave = () => {
     console.log('Manual save triggered')
     saveDocument()
   }
+
+  // Handle spell check updates
+  const handleSpellCheckUpdate = useCallback((data: {
+    isLoading: boolean
+    error: string | null
+    misspelledWords: MisspelledWord[]
+  }) => {
+    setSpellCheckData(data)
+  }, [])
+
+  // Handle word replacement from sidebar
+  const handleWordReplace = useCallback((originalWord: string, replacement: string) => {
+    console.log('Replacing word:', originalWord, 'with:', replacement)
+    replaceWordInContent(originalWord, replacement)
+  }, [replaceWordInContent])
+
+  // Handle ignoring words from sidebar
+  const handleIgnoreWord = useCallback((word: string) => {
+    console.log('Ignoring word:', word)
+    // This will be handled by the SpellCheckWrapper internally
+  }, [])
 
   const getSaveStatusText = () => {
     switch (saveStatus) {
@@ -133,69 +185,92 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#161616] text-white">
-      {/* Header */}
-      <header className="border-b border-gray-800">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/dashboard">
-                  <ArrowLeft className="h-4 w-4 mr-2" />
-                  Back to Dashboard
-                </Link>
-              </Button>
-              <div className="flex items-center space-x-2">
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  onBlur={handleTitleBlur}
-                  className="bg-transparent border-none text-xl font-semibold text-white placeholder:text-gray-500 focus:ring-0 focus:border-none p-0"
-                  placeholder="Document title..."
-                />
+    <div className="min-h-screen bg-[#161616] text-white flex">
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="border-b border-gray-800">
+          <div className="container mx-auto px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href="/dashboard">
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to Dashboard
+                  </Link>
+                </Button>
+                <div className="flex items-center space-x-2">
+                  <Input
+                    value={title}
+                    onChange={(e) => updateCurrentTitle(e.target.value)}
+                    onBlur={handleTitleBlur}
+                    className="bg-transparent border-none text-xl font-semibold text-white placeholder:text-gray-500 focus:ring-0 focus:border-none p-0"
+                    placeholder="Document title..."
+                  />
+                </div>
+              </div>
+              <div className="flex items-center space-x-4">
+                <Button variant="ghost" size="sm" onClick={() => setIsPreview(!isPreview)}>
+                  {isPreview ? (
+                    <>
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="h-4 w-4 mr-2" />
+                      Preview
+                    </>
+                  )}
+                </Button>
+                {saveStatus && (
+                  <span className={`text-sm flex items-center ${getSaveStatusColor()}`}>
+                    {saveStatus === 'saving' && <Save className="h-3 w-3 mr-1 animate-spin" />}
+                    {getSaveStatusText()}
+                  </span>
+                )}
+                <Button onClick={handleManualSave} disabled={isSaving} size="sm">
+                  <Save className="h-4 w-4 mr-2" />
+                  Save
+                </Button>
               </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <Button variant="ghost" size="sm" onClick={() => setIsPreview(!isPreview)}>
-                {isPreview ? (
-                  <>
-                    <Edit className="h-4 w-4 mr-2" />
-                    Edit
-                  </>
-                ) : (
-                  <>
-                    <Eye className="h-4 w-4 mr-2" />
-                    Preview
-                  </>
-                )}
-              </Button>
-              {saveStatus && (
-                <span className={`text-sm flex items-center ${getSaveStatusColor()}`}>
-                  {saveStatus === 'saving' && <Save className="h-3 w-3 mr-1 animate-spin" />}
-                  {getSaveStatusText()}
-                </span>
-              )}
-              <Button onClick={handleManualSave} disabled={isSaving} size="sm">
-                <Save className="h-4 w-4 mr-2" />
-                Save
-              </Button>
-            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Editor */}
-      <div className="container mx-auto px-4 py-8">
-        <div className="bg-white rounded-lg overflow-hidden">
-          {!isPreview ? (
-            <div className="prose prose-lg max-w-none">
-              <Editor content={content} onChange={setContent} />
-            </div>
-          ) : (
-            <div className="p-6 prose prose-lg max-w-none">
-              <ReactMarkdown>{content}</ReactMarkdown>
-            </div>
-          )}
+        {/* Editor */}
+        <div className="flex-1 flex">
+          <div className="flex-1 container mx-auto px-4 py-8">
+            <SpellCheckWrapper 
+              content={content} 
+              onChange={updateCurrentContent}
+              onSpellCheckUpdate={handleSpellCheckUpdate}
+              onIgnoreWord={handleIgnoreWord}
+              onWordReplace={handleWordReplace}
+            >
+              <div className="bg-white rounded-lg overflow-hidden">
+                {!isPreview ? (
+                  <div className="prose prose-lg max-w-none">
+                    <Editor content={content} onChange={updateCurrentContent} />
+                  </div>
+                ) : (
+                  <div className="p-6 prose prose-lg max-w-none">
+                    <ReactMarkdown>{content}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            </SpellCheckWrapper>
+          </div>
+          
+          {/* Inline Spell Check Sidebar */}
+          <SpellCheckSidebar
+            isLoading={spellCheckData.isLoading}
+            error={spellCheckData.error}
+            misspelledWords={spellCheckData.misspelledWords}
+            isOpen={spellCheckSidebarOpen}
+            onToggle={() => setSpellCheckSidebarOpen(!spellCheckSidebarOpen)}
+            onWordReplace={handleWordReplace}
+            onIgnoreWord={handleIgnoreWord}
+          />
         </div>
       </div>
     </div>
