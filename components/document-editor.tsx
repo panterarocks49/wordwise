@@ -11,6 +11,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
+import { useDocumentStore } from "@/lib/stores/document-store"
 import ReactMarkdown from "react-markdown"
 import dynamic from 'next/dynamic'
 import '@mdxeditor/editor/style.css'
@@ -32,46 +33,104 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const [title, setTitle] = useState(document.title)
   const [content, setContent] = useState(document.content)
   const [isSaving, setIsSaving] = useState(false)
-  const [lastSaved, setLastSaved] = useState<Date | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null)
   const [isPreview, setIsPreview] = useState(false)
-  const isMountedRef = useRef(true)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const { updateDocumentInStore } = useDocumentStore()
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false
-    }
-  }, [])
-
-  // Auto-save functionality
+  // Simple save function
   const saveDocument = useCallback(async () => {
-    if (isSaving || !isMountedRef.current) return
-
+    if (isSaving) return
+    
+    console.log('Attempting to save document:', { id: document.id, title, content: content.substring(0, 50) + '...' })
+    
     setIsSaving(true)
+    setSaveStatus('saving')
+    
     try {
       await updateDocument(document.id, title, content)
-      if (isMountedRef.current) {
-        setLastSaved(new Date())
-      }
+      console.log('Document saved successfully')
+      
+      // Update the document store with the new values
+      updateDocumentInStore(document.id, title, content)
+      
+      setSaveStatus('saved')
+      
+      // Clear saved status after 2 seconds
+      setTimeout(() => setSaveStatus(null), 2000)
     } catch (error) {
       console.error("Failed to save document:", error)
+      setSaveStatus('error')
+      // Clear error status after 5 seconds
+      setTimeout(() => setSaveStatus(null), 5000)
     } finally {
-      if (isMountedRef.current) {
-        setIsSaving(false)
-      }
+      setIsSaving(false)
     }
-  }, [document.id, title, content, isSaving])
+  }, [document.id, title, content, isSaving, updateDocumentInStore])
 
-  // Auto-save every 3 seconds when content changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if ((title !== document.title || content !== document.content) && isMountedRef.current) {
+  // Debounced auto-save
+  const scheduleAutoSave = useCallback(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      if (title !== document.title || content !== document.content) {
+        console.log('Auto-saving document due to changes')
         saveDocument()
       }
-    }, 3000)
-
-    return () => clearTimeout(timer)
+    }, 2000) // 2 second delay
   }, [title, content, document.title, document.content, saveDocument])
+
+  // Auto-save when content changes
+  useEffect(() => {
+    scheduleAutoSave()
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [title, content, scheduleAutoSave])
+
+  // Save on title blur
+  const handleTitleBlur = () => {
+    if (title !== document.title && !isSaving) {
+      console.log('Saving due to title blur')
+      saveDocument()
+    }
+  }
+
+  // Manual save button
+  const handleManualSave = () => {
+    console.log('Manual save triggered')
+    saveDocument()
+  }
+
+  const getSaveStatusText = () => {
+    switch (saveStatus) {
+      case 'saving':
+        return 'Saving...'
+      case 'saved':
+        return 'Saved'
+      case 'error':
+        return 'Error saving'
+      default:
+        return null
+    }
+  }
+
+  const getSaveStatusColor = () => {
+    switch (saveStatus) {
+      case 'saving':
+        return 'text-blue-400'
+      case 'saved':
+        return 'text-green-400'
+      case 'error':
+        return 'text-red-400'
+      default:
+        return 'text-gray-400'
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[#161616] text-white">
@@ -90,6 +149,7 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
+                  onBlur={handleTitleBlur}
                   className="bg-transparent border-none text-xl font-semibold text-white placeholder:text-gray-500 focus:ring-0 focus:border-none p-0"
                   placeholder="Document title..."
                 />
@@ -109,14 +169,13 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
                   </>
                 )}
               </Button>
-              {lastSaved && <span className="text-sm text-gray-400">Saved {lastSaved.toLocaleTimeString()}</span>}
-              {isSaving && (
-                <span className="text-sm text-gray-400 flex items-center">
-                  <Save className="h-3 w-3 mr-1 animate-spin" />
-                  Saving...
+              {saveStatus && (
+                <span className={`text-sm flex items-center ${getSaveStatusColor()}`}>
+                  {saveStatus === 'saving' && <Save className="h-3 w-3 mr-1 animate-spin" />}
+                  {getSaveStatusText()}
                 </span>
               )}
-              <Button onClick={saveDocument} disabled={isSaving} size="sm">
+              <Button onClick={handleManualSave} disabled={isSaving} size="sm">
                 <Save className="h-4 w-4 mr-2" />
                 Save
               </Button>

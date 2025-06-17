@@ -3,12 +3,15 @@ import { redirect, notFound } from "next/navigation"
 import DocumentEditor from "@/components/document-editor"
 
 interface DocumentPageProps {
-  params: {
+  params: Promise<{
     id: string
-  }
+  }>
 }
 
 export default async function DocumentPage({ params }: DocumentPageProps) {
+  // Await params for Next.js 15 compatibility
+  const { id } = await params
+  
   const supabase = createClient()
 
   // Get the current user
@@ -24,7 +27,7 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
   const { data: document, error } = await supabase
     .from("documents")
     .select("*")
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("user_id", user.id) // Ensure user owns the document
     .single()
 

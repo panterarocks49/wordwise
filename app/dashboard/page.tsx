@@ -5,19 +5,28 @@ import { LogOut } from "lucide-react"
 import { signOut } from "@/lib/actions"
 import { getUserDocuments } from "@/lib/document-actions"
 import { DocumentsGrid } from "@/components/documents-grid"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import Link from "next/link"
+import { Plus, FileText, Clock } from "lucide-react"
 
 export default async function Dashboard() {
   const supabase = createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  
+  if (userError || !user) {
     redirect("/auth/login")
   }
 
-  // Fetch user's documents server-side for initial render
-  const documents = await getUserDocuments()
+  let documents = []
+  let error = null
+
+  try {
+    documents = await getUserDocuments()
+  } catch (err) {
+    console.error("Failed to fetch documents:", err)
+    error = "Failed to load documents. Please try refreshing the page."
+  }
 
   return (
     <div className="min-h-screen bg-[#161616] text-white">

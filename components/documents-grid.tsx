@@ -21,10 +21,10 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
     fetchDocuments, 
     addDocument, 
     setDocuments,
-    setCurrentUserId
+    setCurrentUserId,
+    currentUserId
   } = useDocumentStore()
   const isMountedRef = useRef(true)
-  const initializedRef = useRef(false)
 
   // Cleanup on unmount
   useEffect(() => {
@@ -33,30 +33,25 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
     }
   }, [])
 
-  // Handle user changes
+  // Handle user changes - this should happen first
   useEffect(() => {
     if (userId && isMountedRef.current) {
       setCurrentUserId(userId)
     }
   }, [userId, setCurrentUserId])
 
-  // Initialize store with server-side data - only once per user
+  // Initialize store with server-side data after user is set
   useEffect(() => {
     if (
       isMountedRef.current && 
-      !initializedRef.current && 
-      initialDocuments.length >= 0 && 
-      documents.length === 0
+      userId && 
+      (currentUserId === userId || currentUserId === null) && // Allow initialization if user matches or not set yet
+      documents.length === 0 &&
+      initialDocuments.length >= 0
     ) {
       setDocuments(initialDocuments)
-      initializedRef.current = true
     }
-  }, [initialDocuments, documents.length, setDocuments])
-
-  // Reset initialization flag when user changes
-  useEffect(() => {
-    initializedRef.current = false
-  }, [userId])
+  }, [initialDocuments, documents.length, setDocuments, userId, currentUserId])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {

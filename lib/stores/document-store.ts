@@ -20,7 +20,7 @@ interface DocumentStore {
   fetchDocuments: () => Promise<void>
   addDocument: () => Promise<void>
   removeDocument: (documentId: string) => Promise<void>
-  updateDocumentInStore: (documentId: string, title: string, content: string) => Promise<void>
+  updateDocumentInStore: (documentId: string, title: string, content: string) => void
   setDocuments: (documents: Document[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
@@ -101,47 +101,42 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     }
   },
 
-  updateDocumentInStore: async (documentId: string, title: string, content: string) => {
-    try {
-      await updateDocument(documentId, title, content)
-      // Update local state
-      const { documents, currentUserId } = get()
-      if (currentUserId) { // Only update if we still have a user
-        set({
-          documents: documents.map(doc => 
-            doc.id === documentId 
-              ? { ...doc, title, content, updated_at: new Date().toISOString() }
-              : doc
-          )
-        })
-      }
-    } catch (error) {
-      const { currentUserId } = get()
-      if (currentUserId) {
-        set({ 
-          error: error instanceof Error ? error.message : 'Failed to update document'
-        })
-      }
+  updateDocumentInStore: (documentId: string, title: string, content: string) => {
+    // This function is called after the document has already been saved to the database
+    // So we just need to update the local store state
+    const { documents, currentUserId } = get()
+    if (currentUserId) { // Only update if we still have a user
+      console.log('Updating document in store:', { documentId, title, content: content.substring(0, 50) + '...' })
+      set({
+        documents: documents.map(doc => 
+          doc.id === documentId 
+            ? { ...doc, title, content, updated_at: new Date().toISOString() }
+            : doc
+        )
+      })
     }
   },
 
   setDocuments: (documents: Document[]) => {
     const { currentUserId } = get()
-    if (currentUserId) {
+    // Allow setting documents if no user is set yet (initial load) or if user matches
+    if (currentUserId === null || currentUserId) {
       set({ documents })
     }
   },
   
   setLoading: (loading: boolean) => {
     const { currentUserId } = get()
-    if (currentUserId) {
+    // Allow setting loading state during initial load or when user is set
+    if (currentUserId === null || currentUserId) {
       set({ loading })
     }
   },
   
   setError: (error: string | null) => {
     const { currentUserId } = get()
-    if (currentUserId) {
+    // Allow setting error state during initial load or when user is set
+    if (currentUserId === null || currentUserId) {
       set({ error })
     }
   },
