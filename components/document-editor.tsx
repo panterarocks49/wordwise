@@ -3,26 +3,20 @@
 import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import {
   ArrowLeft,
   Save,
   Eye,
   Edit,
-  Bold,
-  Italic,
-  Code,
-  List,
-  ListOrdered,
-  Quote,
-  Link2,
-  ImageIcon,
 } from "lucide-react"
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
 import ReactMarkdown from "react-markdown"
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
-import { tomorrow } from "react-syntax-highlighter/dist/esm/styles/prism"
+import dynamic from 'next/dynamic'
+import '@mdxeditor/editor/style.css'
+
+// Dynamically import the editor component
+const Editor = dynamic(() => import('./mdx-editor'), { ssr: false })
 
 interface DocumentEditorProps {
   document: {
@@ -40,7 +34,6 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [isPreview, setIsPreview] = useState(false)
-  const [textareaRef, setTextareaRef] = useState<HTMLTextAreaElement | null>(null)
 
   // Auto-save functionality
   const saveDocument = useCallback(async () => {
@@ -67,45 +60,6 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
 
     return () => clearTimeout(timer)
   }, [title, content, document.title, document.content, saveDocument])
-
-  // Helper function to insert text at cursor position
-  const insertAtCursor = (insertText: string, wrapText = false) => {
-    if (!textareaRef) return
-
-    const start = textareaRef.selectionStart
-    const end = textareaRef.selectionEnd
-    const selectedText = content.substring(start, end)
-
-    let newText
-    if (wrapText && selectedText) {
-      newText = content.substring(0, start) + insertText + selectedText + insertText + content.substring(end)
-    } else {
-      newText = content.substring(0, start) + insertText + content.substring(end)
-    }
-
-    setContent(newText)
-
-    // Set cursor position after insert
-    setTimeout(() => {
-      if (textareaRef) {
-        const newPosition = start + insertText.length + (wrapText && selectedText ? selectedText.length : 0)
-        textareaRef.setSelectionRange(newPosition, newPosition)
-        textareaRef.focus()
-      }
-    }, 0)
-  }
-
-  // Toolbar actions
-  const makeBold = () => insertAtCursor("**", true)
-  const makeItalic = () => insertAtCursor("*", true)
-  const makeCode = () => insertAtCursor("`", true)
-  const makeHeading = () => insertAtCursor("## ")
-  const makeList = () => insertAtCursor("- ")
-  const makeOrderedList = () => insertAtCursor("1. ")
-  const makeQuote = () => insertAtCursor("> ")
-  const makeLink = () => insertAtCursor("[link text](url)")
-  const makeImage = () => insertAtCursor("![alt text](image-url)")
-  const makeCodeBlock = () => insertAtCursor("\n```javascript\n\n```\n")
 
   return (
     <div className="min-h-screen bg-[#161616] text-white">
@@ -162,77 +116,13 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
       {/* Editor */}
       <div className="container mx-auto px-4 py-8">
         <div className="bg-white rounded-lg overflow-hidden">
-          {!isPreview && (
-            <>
-              {/* Toolbar */}
-              <div className="border-b border-gray-200 bg-gray-50 p-3">
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="ghost" size="sm" onClick={makeBold} title="Bold">
-                    <Bold className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeItalic} title="Italic">
-                    <Italic className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeCode} title="Inline Code">
-                    <Code className="h-4 w-4" />
-                  </Button>
-                  <div className="w-px h-6 bg-gray-300 mx-1" />
-                  <Button variant="ghost" size="sm" onClick={makeHeading} title="Heading">
-                    H
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeList} title="Bullet List">
-                    <List className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeOrderedList} title="Numbered List">
-                    <ListOrdered className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeQuote} title="Quote">
-                    <Quote className="h-4 w-4" />
-                  </Button>
-                  <div className="w-px h-6 bg-gray-300 mx-1" />
-                  <Button variant="ghost" size="sm" onClick={makeLink} title="Link">
-                    <Link2 className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeImage} title="Image">
-                    <ImageIcon className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={makeCodeBlock} title="Code Block">
-                    {"{ }"}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Editor Textarea */}
-              <Textarea
-                ref={setTextareaRef}
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Start writing your API documentation here..."
-                className="w-full min-h-[600px] border-none resize-none focus:ring-0 text-gray-900 p-6 font-mono text-sm rounded-none"
-              />
-            </>
-          )}
-
-          {isPreview && (
+          {!isPreview ? (
+            <div className="prose prose-lg max-w-none">
+              <Editor content={content} onChange={setContent} />
+            </div>
+          ) : (
             <div className="p-6 prose prose-lg max-w-none">
-              <ReactMarkdown
-                components={{
-                  code({ node, inline, className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className || "")
-                    return !inline && match ? (
-                      <SyntaxHighlighter style={tomorrow} language={match[1]} PreTag="div" {...props}>
-                        {String(children).replace(/\n$/, "")}
-                      </SyntaxHighlighter>
-                    ) : (
-                      <code className={className} {...props}>
-                        {children}
-                      </code>
-                    )
-                  },
-                }}
-              >
-                {content}
-              </ReactMarkdown>
+              <ReactMarkdown>{content}</ReactMarkdown>
             </div>
           )}
         </div>
