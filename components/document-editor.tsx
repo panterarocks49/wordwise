@@ -16,10 +16,9 @@ import { SpellCheckWrapper, MisspelledWord } from "./spell-check-plugin"
 import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
 import dynamic from 'next/dynamic'
-import '@mdxeditor/editor/style.css'
 
-// Dynamically import the editor component
-const Editor = dynamic(() => import('./mdx-editor'), { ssr: false })
+// Dynamically import the tiptap editor component
+const Editor = dynamic(() => import('./tiptap-editor'), { ssr: false })
 
 interface DocumentEditorProps {
   document: {
