@@ -66,24 +66,21 @@ function createSpellCheckDecorations(
   const words = extractWordsWithPositions(doc)
   const decorations: Decoration[] = []
   const misspelledWords: MisspelledWord[] = []
-  const seenWords = new Set<string>()
+  const seenMisspelledWords = new Set<string>()
 
   for (const { word, from, to } of words) {
     const lowerWord = word.toLowerCase()
     
-    // Skip short words, already seen words, ignored words, and correctly spelled words
+    // Skip short words, ignored words, and correctly spelled words
     if (
       word.length <= 2 || 
-      seenWords.has(lowerWord) ||
       ignoredWords.has(lowerWord) ||
       dictionary.correct(word)
     ) {
       continue
     }
 
-    seenWords.add(lowerWord)
-    
-    // Add decoration for misspelled word
+    // Add decoration for ALL instances of misspelled words
     decorations.push(
       Decoration.inline(from, to, {
         class: 'spell-error',
@@ -91,12 +88,15 @@ function createSpellCheckDecorations(
       })
     )
 
-    // Add to misspelled words list
-    misspelledWords.push({
-      word: lowerWord,
-      suggestions: dictionary.suggest(word).slice(0, 5),
-      position: { from, to }
-    })
+    // Only add to misspelledWords array once per unique word (for the sidebar)
+    if (!seenMisspelledWords.has(lowerWord)) {
+      seenMisspelledWords.add(lowerWord)
+      misspelledWords.push({
+        word: lowerWord,
+        suggestions: dictionary.suggest(word).slice(0, 5),
+        position: { from, to }
+      })
+    }
   }
 
   return {

@@ -110,33 +110,29 @@ export function SpellCheckSidebar({
               </div>
             ) : (
               <ScrollArea className="h-full">
-                <div className="p-4 space-y-4">
+                <div className="p-3 space-y-3">
                   {misspelledWords.map((wordData, index) => (
                     <div
                       key={`${wordData.word}-${index}`}
-                      className="bg-gray-800/50 rounded-lg p-3 border border-gray-700"
+                      className="bg-gray-800/50 rounded-md p-2 border border-gray-700"
                     >
-                      {/* Word */}
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-red-400 font-medium">
+                      {/* Word - more compact header */}
+                      <div className="mb-2">
+                        <span className="text-red-400 font-medium text-sm">
                           {wordData.word}
                         </span>
-                        <Badge variant="secondary" className="text-xs bg-gray-700 text-gray-300">
-                          misspelled
-                        </Badge>
                       </div>
 
-                      {/* Suggestions */}
+                      {/* Suggestions - more compact inline layout */}
                       {wordData.suggestions.length > 0 && (
-                        <div className="mb-3">
-                          <p className="text-xs text-gray-400 mb-2">Suggestions:</p>
+                        <div className="mb-2">
                           <div className="flex flex-wrap gap-1">
-                            {wordData.suggestions.slice(0, 3).map((suggestion, suggestionIndex) => (
+                            {wordData.suggestions.slice(0, 4).map((suggestion, suggestionIndex) => (
                               <Button
                                 key={suggestionIndex}
                                 variant="outline"
                                 size="sm"
-                                className="text-xs h-6 px-2 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600"
+                                className="text-xs h-5 px-2 py-0 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600"
                                 onClick={() => onWordReplace(wordData.word, suggestion)}
                               >
                                 {suggestion}
@@ -146,13 +142,13 @@ export function SpellCheckSidebar({
                         </div>
                       )}
 
-                      {/* Custom replacement */}
-                      <div className="mb-3">
+                      {/* Custom replacement - smaller input */}
+                      <div className="mb-2">
                         <Input
-                          placeholder="Enter replacement..."
+                          placeholder="Custom replacement..."
                           value={replacementWords[wordData.word] || ''}
                           onChange={(e) => updateReplacementWord(wordData.word, e.target.value)}
-                          className="bg-gray-700/50 border-gray-600 text-white placeholder:text-gray-400 text-sm h-8 focus:bg-gray-700"
+                          className="bg-gray-700/50 border-gray-600 text-white placeholder:text-gray-400 text-xs h-6 focus:bg-gray-700"
                           onKeyPress={(e) => {
                             if (e.key === 'Enter') {
                               handleReplaceWord(wordData.word)
@@ -161,12 +157,12 @@ export function SpellCheckSidebar({
                         />
                       </div>
 
-                      {/* Actions */}
-                      <div className="flex gap-2">
+                      {/* Actions - smaller buttons */}
+                      <div className="flex gap-1">
                         <Button
                           variant="outline"
                           size="sm"
-                          className="flex-1 text-xs h-7 bg-blue-600/80 hover:bg-blue-600 text-white border-blue-600/50"
+                          className="flex-1 text-xs h-6 bg-blue-600/80 hover:bg-blue-600 text-white border-blue-600/50"
                           onClick={() => handleReplaceWord(wordData.word)}
                           disabled={!replacementWords[wordData.word]?.trim()}
                         >
@@ -175,7 +171,7 @@ export function SpellCheckSidebar({
                         <Button
                           variant="outline"
                           size="sm"
-                          className="flex-1 text-xs h-7 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600"
+                          className="flex-1 text-xs h-6 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600"
                           onClick={() => handleIgnoreWord(wordData.word)}
                         >
                           Ignore
