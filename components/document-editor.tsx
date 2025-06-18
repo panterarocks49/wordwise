@@ -10,6 +10,7 @@ import {
   Edit,
   ChevronLeft,
   ChevronRight,
+  Check,
 } from "lucide-react"
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
@@ -34,9 +35,10 @@ interface DocumentEditorProps {
 
 export default function DocumentEditor({ document }: DocumentEditorProps) {
   const [isSaving, setIsSaving] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | null>(null)
   const [isPreview, setIsPreview] = useState(false)
   const [spellCheckSidebarOpen, setSpellCheckSidebarOpen] = useState(true)
+  const [lastSavedTitle, setLastSavedTitle] = useState(document.title)
+  const [lastSavedContent, setLastSavedContent] = useState(document.content)
   const [spellCheckData, setSpellCheckData] = useState<{
     isLoading: boolean
     error: string | null
@@ -46,7 +48,7 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     error: null,
     misspelledWords: []
   })
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const editorRef = useRef<any>(null)
   
   const { 
@@ -71,10 +73,10 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const title = currentTitle || document.title
   const content = currentContent || document.content
 
-  // Memoize the hasChanges function to prevent unnecessary re-computations
+  // Memoize the hasChanges function to compare against last saved values
   const hasChanges = useMemo(() => {
-    return title !== document.title || content !== document.content
-  }, [title, content, document.title, document.content])
+    return title !== lastSavedTitle || content !== lastSavedContent
+  }, [title, content, lastSavedTitle, lastSavedContent])
 
   // Simple save function - memoized to prevent recreation
   const saveDocument = useCallback(async () => {
@@ -86,7 +88,6 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     console.log('Attempting to save document:', { id: document.id, title, content: content.substring(0, 50) + '...' })
     
     setIsSaving(true)
-    setSaveStatus('saving')
     
     try {
       await updateDocument(document.id, title, content)
@@ -95,54 +96,33 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
       // Update the document store with the new values
       updateDocumentInStore(document.id, title, content)
       
-      setSaveStatus('saved')
-      
-      // Clear saved status after 2 seconds
-      setTimeout(() => setSaveStatus(null), 2000)
+      // Update our last saved tracking
+      setLastSavedTitle(title)
+      setLastSavedContent(content)
     } catch (error) {
       console.error("Failed to save document:", error)
-      setSaveStatus('error')
-      // Clear error status after 5 seconds
-      setTimeout(() => setSaveStatus(null), 5000)
     } finally {
       setIsSaving(false)
     }
-  }, [document.id, title, content, isSaving, updateDocumentInStore, hasChanges])
+  }, [document.id, title, content, isSaving, updateDocumentInStore, hasChanges, lastSavedTitle, lastSavedContent])
 
-  // Debounced auto-save - memoized to prevent recreation
-  const scheduleAutoSave = useCallback(() => {
-    // Only schedule auto-save if there are actual changes
-    if (!hasChanges) {
-      console.log('Skipping auto-save scheduling - no changes detected')
-      return
-    }
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-    }
-    
-    console.log('Scheduling auto-save in 2 seconds')
-    saveTimeoutRef.current = setTimeout(() => {
-      if (hasChanges) {
-        console.log('Auto-saving document due to changes')
-        saveDocument()
-      } else {
-        console.log('Skipping auto-save - no changes at save time')
-      }
-    }, 2000) // 2 second delay
-  }, [hasChanges, saveDocument])
-
-  // Auto-save when content changes (but only if there are actual changes)
+  // Continuous auto-save loop - runs every 2 seconds and only saves if there are changes
   useEffect(() => {
-    if (hasChanges) {
-      scheduleAutoSave()
-    }
+    console.log('Setting up auto-save interval')
+    autoSaveIntervalRef.current = setInterval(() => {
+      if (hasChanges && !isSaving) {
+        console.log('Auto-saving document due to changes detected in interval')
+        saveDocument()
+      }
+    }, 2000) // Check every 2 seconds
+
     return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current)
+      console.log('Cleaning up auto-save interval')
+      if (autoSaveIntervalRef.current) {
+        clearInterval(autoSaveIntervalRef.current)
       }
     }
-  }, [hasChanges, scheduleAutoSave])
+  }, [hasChanges, isSaving, saveDocument])
 
   // Memoize event handlers to prevent recreation on every render
   const handleTitleBlur = useCallback(() => {
@@ -192,32 +172,6 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     setSpellCheckSidebarOpen(!spellCheckSidebarOpen)
   }, [spellCheckSidebarOpen])
 
-  const getSaveStatusText = () => {
-    switch (saveStatus) {
-      case 'saving':
-        return 'Saving...'
-      case 'saved':
-        return 'Saved'
-      case 'error':
-        return 'Error saving'
-      default:
-        return null
-    }
-  }
-
-  const getSaveStatusColor = () => {
-    switch (saveStatus) {
-      case 'saving':
-        return 'text-blue-400'
-      case 'saved':
-        return 'text-green-400'
-      case 'error':
-        return 'text-red-400'
-      default:
-        return 'text-gray-400'
-    }
-  }
-
   return (
     <div className="h-screen bg-[#161616] text-white flex">
       {/* Main Editor Area */}
@@ -245,15 +199,23 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
               </div>
               <div className="flex items-center space-x-4">
                 <Button onClick={handleManualSave} disabled={isSaving} size="sm">
-                  <Save className="h-4 w-4 mr-2" />
-                  Save
+                  {isSaving ? (
+                    <>
+                      <Save className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : !hasChanges ? (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Saved
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Save
+                    </>
+                  )}
                 </Button>
-                {saveStatus && (
-                  <span className={`text-sm flex items-center ${getSaveStatusColor()}`}>
-                    {saveStatus === 'saving' && <Save className="h-3 w-3 mr-1 animate-spin" />}
-                    {getSaveStatusText()}
-                  </span>
-                )}
               </div>
             </div>
           </div>
