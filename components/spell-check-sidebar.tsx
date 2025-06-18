@@ -13,7 +13,7 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react"
-import { MisspelledWord } from "./spell-check-plugin"
+import { MisspelledWord } from "./spell-check-extension"
 
 interface SpellCheckSidebarProps {
   isLoading: boolean

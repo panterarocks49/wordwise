@@ -137,6 +137,9 @@ importers:
       '@supabase/supabase-js':
         specifier: latest
         version: 2.50.0
+      '@tiptap/core':
+        specifier: ^2.14.0
+        version: 2.14.0(@tiptap/pm@2.14.0)
       '@tiptap/extension-code-block-lowlight':
         specifier: ^2.14.0
         version: 2.14.0(@tiptap/core@2.14.0(@tiptap/pm@2.14.0))(@tiptap/extension-code-block@2.14.0(@tiptap/core@2.14.0(@tiptap/pm@2.14.0))(@tiptap/pm@2.14.0))(@tiptap/pm@2.14.0)(highlight.js@11.11.1)(lowlight@3.3.0)
@@ -218,9 +221,15 @@ importers:
       nspell:
         specifier: ^2.1.5
         version: 2.1.5
+      prosemirror-model:
+        specifier: ^1.25.1
+        version: 1.25.1
       prosemirror-state:
         specifier: ^1.4.3
         version: 1.4.3
+      prosemirror-view:
+        specifier: ^1.40.0
+        version: 1.40.0
       react:
         specifier: ^19
         version: 19.1.0

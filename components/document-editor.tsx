@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef } from "react"
+import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -12,7 +12,7 @@ import {
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
 import { useDocumentStore } from "@/lib/stores/document-store"
-import { SpellCheckWrapper, MisspelledWord } from "./spell-check-plugin"
+import { MisspelledWord as TipTapMisspelledWord, ignoreWord, replaceWord } from "./spell-check-extension"
 import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
 import dynamic from 'next/dynamic'
@@ -38,13 +38,14 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const [spellCheckData, setSpellCheckData] = useState<{
     isLoading: boolean
     error: string | null
-    misspelledWords: MisspelledWord[]
+    misspelledWords: TipTapMisspelledWord[]
   }>({
     isLoading: true,
     error: null,
     misspelledWords: []
   })
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const editorRef = useRef<any>(null)
   
   const { 
     updateDocumentInStore,
@@ -58,19 +59,27 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     replaceWordInContent
   } = useDocumentStore()
 
-  // Initialize the current document in the store
+  // Initialize the current document in the store only once
   useEffect(() => {
     const docWithUserId = { ...document, user_id: '' } // Add missing user_id field
     setCurrentDocument(docWithUserId)
-  }, [document, setCurrentDocument])
+  }, [document.id, setCurrentDocument]) // Only re-run if document ID changes
 
   // Use store values with fallbacks
   const title = currentTitle || document.title
   const content = currentContent || document.content
 
-  // Simple save function
+  // Memoize the hasChanges function to prevent unnecessary re-computations
+  const hasChanges = useMemo(() => {
+    return title !== document.title || content !== document.content
+  }, [title, content, document.title, document.content])
+
+  // Simple save function - memoized to prevent recreation
   const saveDocument = useCallback(async () => {
-    if (isSaving) return
+    if (isSaving || !hasChanges) {
+      console.log('Skipping save - no changes or already saving')
+      return
+    }
     
     console.log('Attempting to save document:', { id: document.id, title, content: content.substring(0, 50) + '...' })
     
@@ -96,66 +105,90 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     } finally {
       setIsSaving(false)
     }
-  }, [document.id, title, content, isSaving, updateDocumentInStore])
+  }, [document.id, title, content, isSaving, updateDocumentInStore, hasChanges])
 
-  // Debounced auto-save
+  // Debounced auto-save - memoized to prevent recreation
   const scheduleAutoSave = useCallback(() => {
+    // Only schedule auto-save if there are actual changes
+    if (!hasChanges) {
+      console.log('Skipping auto-save scheduling - no changes detected')
+      return
+    }
+
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current)
     }
     
+    console.log('Scheduling auto-save in 2 seconds')
     saveTimeoutRef.current = setTimeout(() => {
-      if (title !== document.title || content !== document.content) {
+      if (hasChanges) {
         console.log('Auto-saving document due to changes')
         saveDocument()
+      } else {
+        console.log('Skipping auto-save - no changes at save time')
       }
     }, 2000) // 2 second delay
-  }, [title, content, document.title, document.content, saveDocument])
+  }, [hasChanges, saveDocument])
 
-  // Auto-save when content changes
+  // Auto-save when content changes (but only if there are actual changes)
   useEffect(() => {
-    scheduleAutoSave()
+    if (hasChanges) {
+      scheduleAutoSave()
+    }
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current)
       }
     }
-  }, [title, content, scheduleAutoSave])
+  }, [hasChanges, scheduleAutoSave])
 
-  // Save on title blur
+  // Memoize event handlers to prevent recreation on every render
   const handleTitleBlur = useCallback(() => {
-    if (title !== document.title && !isSaving) {
+    if (hasChanges && !isSaving) {
       console.log('Saving due to title blur')
       saveDocument()
     }
-  }, [title, document.title, isSaving, saveDocument])
+  }, [hasChanges, isSaving, saveDocument])
 
-  // Manual save button
-  const handleManualSave = () => {
+  const handleManualSave = useCallback(() => {
     console.log('Manual save triggered')
     saveDocument()
-  }
+  }, [saveDocument])
 
-  // Handle spell check updates
+  // Handle spell check updates - memoized
   const handleSpellCheckUpdate = useCallback((data: {
     isLoading: boolean
     error: string | null
-    misspelledWords: MisspelledWord[]
+    misspelledWords: TipTapMisspelledWord[]
   }) => {
     setSpellCheckData(data)
   }, [])
 
-  // Handle word replacement from sidebar
+  // Handle word replacement from sidebar - memoized
   const handleWordReplace = useCallback((originalWord: string, replacement: string) => {
     console.log('Replacing word:', originalWord, 'with:', replacement)
-    replaceWordInContent(originalWord, replacement)
-  }, [replaceWordInContent])
+    if (editorRef.current) {
+      replaceWord(editorRef.current, originalWord, replacement)
+    }
+  }, [])
 
-  // Handle ignoring words from sidebar
+  // Handle ignoring words from sidebar - memoized
   const handleIgnoreWord = useCallback((word: string) => {
     console.log('Ignoring word:', word)
-    // This will be handled by the SpellCheckWrapper internally
+    if (editorRef.current) {
+      ignoreWord(editorRef.current, word)
+    }
   }, [])
+
+  // Memoize preview toggle
+  const togglePreview = useCallback(() => {
+    setIsPreview(!isPreview)
+  }, [isPreview])
+
+  // Memoize sidebar toggle
+  const toggleSpellCheckSidebar = useCallback(() => {
+    setSpellCheckSidebarOpen(!spellCheckSidebarOpen)
+  }, [spellCheckSidebarOpen])
 
   const getSaveStatusText = () => {
     switch (saveStatus) {
@@ -208,7 +241,7 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
                 </div>
               </div>
               <div className="flex items-center space-x-4">
-                <Button variant="ghost" size="sm" onClick={() => setIsPreview(!isPreview)}>
+                <Button variant="ghost" size="sm" onClick={togglePreview}>
                   {isPreview ? (
                     <>
                       <Edit className="h-4 w-4 mr-2" />
@@ -239,25 +272,22 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
         {/* Editor */}
         <div className="flex-1 flex">
           <div className="flex-1 container mx-auto px-4 py-8">
-            <SpellCheckWrapper 
-              content={content} 
-              onChange={updateCurrentContent}
-              onSpellCheckUpdate={handleSpellCheckUpdate}
-              onIgnoreWord={handleIgnoreWord}
-              onWordReplace={handleWordReplace}
-            >
-              <div className="bg-white rounded-lg overflow-hidden">
-                {!isPreview ? (
-                  <div className="prose prose-lg max-w-none">
-                    <Editor content={content} onChange={updateCurrentContent} />
-                  </div>
-                ) : (
-                  <div className="p-6 prose prose-lg max-w-none">
-                    <ReactMarkdown>{content}</ReactMarkdown>
-                  </div>
-                )}
-              </div>
-            </SpellCheckWrapper>
+            <div className="bg-white rounded-lg overflow-hidden">
+              {!isPreview ? (
+                <div className="prose prose-lg max-w-none">
+                  <Editor 
+                    content={content} 
+                    onChange={updateCurrentContent}
+                    onSpellCheckUpdate={handleSpellCheckUpdate}
+                    editorRef={editorRef}
+                  />
+                </div>
+              ) : (
+                <div className="p-6 prose prose-lg max-w-none">
+                  <ReactMarkdown>{content}</ReactMarkdown>
+                </div>
+              )}
+            </div>
           </div>
           
           {/* Inline Spell Check Sidebar */}
@@ -266,7 +296,7 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
             error={spellCheckData.error}
             misspelledWords={spellCheckData.misspelledWords}
             isOpen={spellCheckSidebarOpen}
-            onToggle={() => setSpellCheckSidebarOpen(!spellCheckSidebarOpen)}
+            onToggle={toggleSpellCheckSidebar}
             onWordReplace={handleWordReplace}
             onIgnoreWord={handleIgnoreWord}
           />

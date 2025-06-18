@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import nspell from 'nspell'
 
 interface SpellCheckWrapperProps {
@@ -35,6 +35,10 @@ export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({
   const [error, setError] = useState<string | null>(null)
   const [misspelledWords, setMisspelledWords] = useState<MisspelledWord[]>([])
   const [ignoredWords, setIgnoredWords] = useState<Set<string>>(new Set())
+  
+  // Add debouncing for spell check
+  const spellCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastContentRef = useRef<string>('')
 
   const loadDictionary = useCallback(async () => {
     try {
@@ -103,15 +107,40 @@ export const SpellCheckWrapper: React.FC<SpellCheckWrapperProps> = ({
     setMisspelledWords(misspelled)
   }, [dictionary, ignoredWords, extractTextForSpellCheck])
 
+  // Debounced spell check function
+  const debouncedSpellCheck = useCallback((markdown: string) => {
+    // Clear any existing timeout
+    if (spellCheckTimeoutRef.current) {
+      clearTimeout(spellCheckTimeoutRef.current)
+    }
+
+    // Set a new timeout to run spell check after user stops typing
+    spellCheckTimeoutRef.current = setTimeout(() => {
+      if (markdown !== lastContentRef.current) {
+        console.log('Running debounced spell check')
+        checkSpelling(markdown)
+        lastContentRef.current = markdown
+      }
+    }, 1000) // Wait 1 second after user stops typing
+  }, [checkSpelling])
+
   useEffect(() => {
     loadDictionary()
   }, [loadDictionary])
 
+  // Replace the immediate spell check with debounced version
   useEffect(() => {
     if (dictionary && content) {
-      checkSpelling(content)
+      debouncedSpellCheck(content)
     }
-  }, [content, dictionary, checkSpelling])
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (spellCheckTimeoutRef.current) {
+        clearTimeout(spellCheckTimeoutRef.current)
+      }
+    }
+  }, [content, dictionary, debouncedSpellCheck])
 
   // Notify parent component of spell check updates
   useEffect(() => {

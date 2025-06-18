@@ -11,7 +11,7 @@ import TableCell from '@tiptap/extension-table-cell'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { useDocumentStore } from '@/lib/stores/document-store'
 import { Button } from '@/components/ui/button'
 import { 
@@ -30,95 +30,129 @@ import {
   Braces
 } from 'lucide-react'
 import { CodeBlockExtension } from './code-block-extension'
+import { SpellCheckExtension, MisspelledWord } from './spell-check-extension'
 
 interface TiptapEditorProps {
   content: string
   onChange: (content: string) => void
+  onSpellCheckUpdate?: (data: {
+    isLoading: boolean
+    error: string | null
+    misspelledWords: MisspelledWord[]
+  }) => void
+  editorRef?: React.MutableRefObject<any>
 }
 
-export default function TiptapEditor({ content, onChange }: TiptapEditorProps) {
+export default function TiptapEditor({ content, onChange, onSpellCheckUpdate, editorRef }: TiptapEditorProps) {
   const isInternalChange = useRef(false)
+  const lastExternalContent = useRef<string>('')
   const { currentContent, contentChangeCount } = useDocumentStore()
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        codeBlock: false, // We'll use our custom CodeBlock with CodeMirror
-      }),
-      Link.configure({
-        openOnClick: false,
-        HTMLAttributes: {
-          class: 'text-blue-600 underline cursor-pointer',
-        },
-      }),
-      Image.configure({
-        HTMLAttributes: {
-          class: 'max-w-full h-auto',
-        },
-      }),
-      CodeBlockExtension,
-      Table.configure({
-        resizable: true,
-      }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      TaskList,
-      TaskItem.configure({
-        nested: true,
-      }),
-      Placeholder.configure({
-        placeholder: 'Start writing your document...',
-      }),
-    ],
-    content,
-    onUpdate: ({ editor }) => {
-      isInternalChange.current = true
-      const html = editor.getHTML()
-      onChange(html)
-    },
-    editorProps: {
-      attributes: {
-        class: 'prose prose-lg max-w-none min-h-[500px] p-6 focus:outline-none text-gray-900',
+  // Memoize extensions to prevent recreation on every render
+  const extensions = useMemo(() => [
+    StarterKit.configure({
+      codeBlock: false, // We'll use our custom CodeBlock with CodeMirror
+    }),
+    Link.configure({
+      openOnClick: false,
+      HTMLAttributes: {
+        class: 'text-blue-600 underline cursor-pointer',
       },
+    }),
+    Image.configure({
+      HTMLAttributes: {
+        class: 'max-w-full h-auto',
+      },
+    }),
+    CodeBlockExtension,
+    SpellCheckExtension.configure({
+      onSpellCheckUpdate: onSpellCheckUpdate,
+    }),
+    Table.configure({
+      resizable: true,
+    }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    TaskList,
+    TaskItem.configure({
+      nested: true,
+    }),
+    Placeholder.configure({
+      placeholder: 'Start writing your document...',
+    }),
+  ], [onSpellCheckUpdate])
+
+  // Memoize editor props to prevent recreation
+  const editorProps = useMemo(() => ({
+    attributes: {
+      class: 'prose prose-lg max-w-none min-h-[500px] p-6 focus:outline-none text-gray-900',
+      spellcheck: 'false',
     },
+  }), [])
+
+  // Optimize the onChange callback
+  const handleUpdate = useCallback(({ editor }: { editor: any }) => {
+    isInternalChange.current = true
+    const html = editor.getHTML()
+    onChange(html)
+  }, [onChange])
+
+  const editor = useEditor({
+    extensions,
+    content,
+    onUpdate: handleUpdate,
+    editorProps,
   })
 
-  // Handle external content changes (from spell check)
+  // Expose editor to parent component via ref
   useEffect(() => {
-    if (!isInternalChange.current && currentContent && editor && currentContent !== editor.getHTML()) {
+    if (editorRef && editor) {
+      editorRef.current = editor
+    }
+  }, [editor, editorRef])
+
+  // Optimize external content change detection
+  useEffect(() => {
+    if (!isInternalChange.current && 
+        currentContent && 
+        editor && 
+        currentContent !== editor.getHTML() &&
+        currentContent !== lastExternalContent.current) {
       console.log('External content change detected, updating editor')
       editor.commands.setContent(currentContent)
+      lastExternalContent.current = currentContent
     }
     isInternalChange.current = false
   }, [currentContent, contentChangeCount, editor])
 
-  // Initialize editor with content
+  // Initialize editor with content - only run once
   useEffect(() => {
     if (editor && content && !editor.getHTML()) {
       editor.commands.setContent(content)
     }
   }, [editor, content])
 
-  const addImage = () => {
+  // Memoize button handlers to prevent recreation
+  const addImage = useCallback(() => {
     const url = window.prompt('Enter image URL:')
     if (url && editor) {
       editor.chain().focus().setImage({ src: url }).run()
     }
-  }
+  }, [editor])
 
-  const addLink = () => {
+  const addLink = useCallback(() => {
     const url = window.prompt('Enter URL:')
     if (url && editor) {
       editor.chain().focus().setLink({ href: url }).run()
     }
-  }
+  }, [editor])
 
-  const addTable = () => {
+  const addTable = useCallback(() => {
     if (editor) {
       editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
     }
-  }
+  }, [editor])
 
   if (!editor) {
     return <div className="p-6">Loading editor...</div>
@@ -126,6 +160,16 @@ export default function TiptapEditor({ content, onChange }: TiptapEditorProps) {
 
   return (
     <div className="border border-gray-300 rounded-lg bg-white">
+      {/* Add spell check styles */}
+      <style jsx>{`
+        .spell-error {
+          text-decoration: underline;
+          text-decoration-color: #ef4444;
+          text-decoration-style: wavy;
+          text-underline-offset: 2px;
+        }
+      `}</style>
+      
       <div className="border-b border-gray-200 p-2 flex flex-wrap gap-2">
         <Button
           variant="outline"
@@ -208,9 +252,6 @@ export default function TiptapEditor({ content, onChange }: TiptapEditorProps) {
           variant="outline"
           size="sm"
           onClick={() => {
-            console.log('Code block button clicked')
-            console.log('Editor can toggle code block:', editor.can().toggleCodeBlock())
-            console.log('Is code block active:', editor.isActive('codeBlock'))
             const result = editor.chain().focus().toggleCodeBlock().run()
             console.log('Toggle code block result:', result)
           }}
