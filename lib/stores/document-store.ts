@@ -99,14 +99,17 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     
     try {
       set({ loading: true, error: null })
-      await deleteDocument(documentId)
-      // Remove from local state immediately
-      const { documents, currentUserId } = get()
-      if (currentUserId) { // Only update if we still have a user
-        set({ 
-          documents: documents.filter(doc => doc.id !== documentId),
-          loading: false 
-        })
+      const result = await deleteDocument(documentId)
+      
+      if (result.success) {
+        // Update the documents list by removing the deleted document
+        const { documents, currentUserId } = get()
+        if (currentUserId) { // Only update if we still have a user
+          set({ 
+            documents: documents.filter(doc => doc.id !== documentId),
+            loading: false 
+          })
+        }
       }
     } catch (error) {
       const { currentUserId } = get()
@@ -116,6 +119,8 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
           loading: false 
         })
       }
+      // Re-throw the error so the component can catch it and show an alert
+      throw error
     }
   },
 

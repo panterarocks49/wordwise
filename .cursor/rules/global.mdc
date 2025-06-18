@@ -1,0 +1,52 @@
+---
+description: "High-level overview of the project architecture, tech stack, and coding conventions. This rule applies to all files."
+globs: 
+alwaysApply: true
+---
+
+# Project Overview & Guidelines
+
+This document provides a high-level overview of the project to guide AI-assisted development.
+
+## 1. Tech Stack
+
+-   **Framework**: Next.js (App Router)
+-   **Language**: TypeScript
+-   **Styling**: Tailwind CSS
+-   **UI Components**: shadcn/ui. Components are located in `@/components/ui`.
+-   **Authentication**: Supabase Auth. Server-side logic is in `@/lib/actions.ts` and Supabase client setup in `@/lib/supabase/`.
+-   **Package Manager**: pnpm
+
+## 2. Project Structure
+
+-   `app/`: Contains all the routes.
+    -   `app/(auth)/`: Auth-related pages like login and sign-up.
+    -   `app/dashboard/`: Protected routes for the user dashboard.
+-   `components/`: React components.
+    -   `components/ui/`: Reusable UI components from shadcn/ui.
+    -   Other component files are feature-specific.
+-   `lib/`: Utility functions, Supabase client, and server actions.
+    -   `lib/actions.ts`: Server Actions for form submissions (e.g., sign-in, sign-up).
+-   `hooks/`: Custom React hooks.
+-   `styles/`: Global styles.
+-   `types/`: TypeScript type definitions.
+
+## 3. Coding Conventions
+
+-   **File Naming**: Use kebab-case for files and directories (e.g., `user-profile.tsx`).
+-   **Component Style**:
+    -   Use functional components with hooks.
+    -   Props should be typed using TypeScript interfaces.
+    -   For new UI, use components from `components/ui` whenever possible.
+-   **State Management**: For simple cases, use React's built-in state management (useState, useReducer, useContext). For more complex state, consider a library if needed, but none is currently in use.
+-   **Server-Side Logic**: Use Next.js Server Actions for mutations and data fetching where appropriate. See `@/lib/actions.ts` for examples.
+-   **Environment Variables**: Use `.env.local` for environment variables. Refer to `.env.example` if it exists.
+
+## 4. Key Files for Context
+
+When working on specific features, refer to these files:
+
+-   **Tailwind Config**: `@/tailwind.config.ts`
+-   **TypeScript Config**: `@/tsconfig.json`
+-   **Next.js Config**: `@/next.config.mjs`
+-   **Middleware for protected routes**: `@/middleware.ts`

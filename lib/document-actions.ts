@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
+import { revalidatePath } from "next/cache"
 
 export async function createDocument() {
   const supabase = await createClient()
@@ -108,9 +109,9 @@ export async function deleteDocument(documentId: string) {
   }
 
   // Delete the document
-  const { error } = await supabase
+  const { count, error } = await supabase
     .from("documents")
-    .delete()
+    .delete({ count: "exact" })
     .eq("id", documentId)
     .eq("user_id", user.id) // Ensure user owns the document
 
@@ -118,4 +119,14 @@ export async function deleteDocument(documentId: string) {
     console.error("Error deleting document:", error)
     throw new Error("Failed to delete document")
   }
+
+  if (count === 0) {
+    throw new Error("Failed to delete document. It may have already been deleted.")
+  }
+
+  // Revalidate the dashboard path to ensure the document list is updated
+  revalidatePath("/dashboard", "layout")
+  
+  // Don't redirect here - let the client handle the UI update
+  return { success: true }
 }
