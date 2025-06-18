@@ -76,21 +76,8 @@ export function SpellCheckSidebar({
 
   return (
     <div className={`bg-[#161616] border-l border-gray-800 transition-all duration-300 ease-in-out ${
-      isOpen ? 'w-80' : 'w-12'
-    } flex flex-col`}>
-      {/* Toggle Button */}
-      <div className="p-2 border-b border-gray-800">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onToggle}
-          className="w-full justify-center text-gray-400 hover:text-white hover:bg-gray-800"
-        >
-          {isOpen ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          {isOpen && <span className="ml-2">Collapse</span>}
-        </Button>
-      </div>
-
+      isOpen ? 'w-80' : 'w-0'
+    } flex flex-col overflow-hidden`}>
       {isOpen && (
         <>
           {/* Header */}

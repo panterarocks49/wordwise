@@ -8,6 +8,8 @@ import {
   Save,
   Eye,
   Edit,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
@@ -217,10 +219,11 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#161616] text-white flex">
+    <div className="h-screen bg-[#161616] text-white flex">
+      {/* Main Editor Area */}
       <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="border-b border-gray-800">
+        {/* Fixed Header */}
+        <header className="flex-shrink-0 border-b border-gray-800 pr-12">
           <div className="container mx-auto px-4 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
@@ -241,18 +244,9 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
                 </div>
               </div>
               <div className="flex items-center space-x-4">
-                <Button variant="ghost" size="sm" onClick={togglePreview}>
-                  {isPreview ? (
-                    <>
-                      <Edit className="h-4 w-4 mr-2" />
-                      Edit
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="h-4 w-4 mr-2" />
-                      Preview
-                    </>
-                  )}
+                <Button onClick={handleManualSave} disabled={isSaving} size="sm">
+                  <Save className="h-4 w-4 mr-2" />
+                  Save
                 </Button>
                 {saveStatus && (
                   <span className={`text-sm flex items-center ${getSaveStatusColor()}`}>
@@ -260,18 +254,14 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
                     {getSaveStatusText()}
                   </span>
                 )}
-                <Button onClick={handleManualSave} disabled={isSaving} size="sm">
-                  <Save className="h-4 w-4 mr-2" />
-                  Save
-                </Button>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Editor */}
-        <div className="flex-1 flex">
-          <div className="flex-1 container mx-auto px-4 py-8">
+        {/* Editor Content - Scrollable */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="container mx-auto px-4 py-8">
             <div className="bg-white rounded-lg overflow-hidden">
               {!isPreview ? (
                 <div className="prose prose-lg max-w-none">
@@ -289,19 +279,35 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
               )}
             </div>
           </div>
-          
-          {/* Inline Spell Check Sidebar */}
-          <SpellCheckSidebar
-            isLoading={spellCheckData.isLoading}
-            error={spellCheckData.error}
-            misspelledWords={spellCheckData.misspelledWords}
-            isOpen={spellCheckSidebarOpen}
-            onToggle={toggleSpellCheckSidebar}
-            onWordReplace={handleWordReplace}
-            onIgnoreWord={handleIgnoreWord}
-          />
         </div>
       </div>
+      
+      {/* Sidebar - Full height, separate column */}
+      <SpellCheckSidebar
+        isLoading={spellCheckData.isLoading}
+        error={spellCheckData.error}
+        misspelledWords={spellCheckData.misspelledWords}
+        isOpen={spellCheckSidebarOpen}
+        onToggle={toggleSpellCheckSidebar}
+        onWordReplace={handleWordReplace}
+        onIgnoreWord={handleIgnoreWord}
+      />
+      
+      {/* Floating Sidebar Toggle Button */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={toggleSpellCheckSidebar}
+        className={`fixed top-4 z-50 h-10 w-8 rounded-l-lg rounded-r-none bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 border-r-0 transition-all duration-300 ${
+          spellCheckSidebarOpen ? 'right-80' : 'right-0'
+        }`}
+      >
+        {spellCheckSidebarOpen ? (
+          <ChevronRight className="h-4 w-4" />
+        ) : (
+          <ChevronLeft className="h-4 w-4" />
+        )}
+      </Button>
     </div>
   )
 }
