@@ -16,7 +16,7 @@ export default async function LandingPage() {
   }
 
   // Check if user is already logged in
-  const supabase = createClient()
+  const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()

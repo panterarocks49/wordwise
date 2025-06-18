@@ -12,7 +12,7 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
   // Await params for Next.js 15 compatibility
   const { id } = await params
   
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // Get the current user
   const {

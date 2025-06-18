@@ -10,7 +10,7 @@ import Link from "next/link"
 import { Plus, FileText, Clock } from "lucide-react"
 
 export default async function Dashboard() {
-  const supabase = createClient()
+  const supabase = await createClient()
   
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   

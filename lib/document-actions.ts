@@ -1,12 +1,10 @@
 "use server"
 
-import { createServerActionClient } from "@supabase/auth-helpers-nextjs"
-import { cookies } from "next/headers"
+import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 
 export async function createDocument() {
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
+  const supabase = await createClient()
 
   // Get the current user
   const {
@@ -39,8 +37,7 @@ export async function createDocument() {
 }
 
 export async function updateDocument(documentId: string, title: string, content: string) {
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
+  const supabase = await createClient()
 
   // Get the current user
   const {
@@ -70,8 +67,7 @@ export async function updateDocument(documentId: string, title: string, content:
 }
 
 export async function getUserDocuments() {
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
+  const supabase = await createClient()
 
   // Get the current user
   const {
@@ -99,8 +95,7 @@ export async function getUserDocuments() {
 }
 
 export async function deleteDocument(documentId: string) {
-  const cookieStore = cookies()
-  const supabase = createServerActionClient({ cookies: () => cookieStore })
+  const supabase = await createClient()
 
   // Get the current user
   const {
