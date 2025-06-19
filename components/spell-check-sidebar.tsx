@@ -21,7 +21,7 @@ interface SpellCheckSidebarProps {
   misspelledWords: MisspelledWord[]
   isOpen: boolean
   onToggle: () => void
-  onWordReplace: (originalWord: string, replacement: string) => void
+  onWordReplace: (from: number, to: number, replacement: string) => void
   onIgnoreWord: (word: string) => void
 }
 
@@ -36,13 +36,17 @@ export function SpellCheckSidebar({
 }: SpellCheckSidebarProps) {
   const [replacementWords, setReplacementWords] = useState<Record<string, string>>({})
 
-  const handleReplaceWord = (originalWord: string) => {
-    const replacement = replacementWords[originalWord]
+  const handleReplaceWord = (wordData: MisspelledWord) => {
+    const replacement = replacementWords[wordData.word]
     if (replacement && replacement.trim()) {
-      onWordReplace(originalWord, replacement.trim())
+      onWordReplace(wordData.position.from, wordData.position.to, replacement.trim())
       // Clear the replacement input
-      setReplacementWords(prev => ({ ...prev, [originalWord]: '' }))
+      setReplacementWords(prev => ({ ...prev, [wordData.word]: '' }))
     }
+  }
+
+  const handleSuggestionReplace = (wordData: MisspelledWord, suggestion: string) => {
+    onWordReplace(wordData.position.from, wordData.position.to, suggestion)
   }
 
   const handleIgnoreWord = (word: string) => {
@@ -133,7 +137,7 @@ export function SpellCheckSidebar({
                                 variant="outline"
                                 size="sm"
                                 className="text-xs h-5 px-2 py-0 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600"
-                                onClick={() => onWordReplace(wordData.word, suggestion)}
+                                onClick={() => handleSuggestionReplace(wordData, suggestion)}
                               >
                                 {suggestion}
                               </Button>
@@ -151,7 +155,7 @@ export function SpellCheckSidebar({
                           className="bg-gray-700/50 border-gray-600 text-white placeholder:text-gray-400 text-xs h-6 focus:bg-gray-700"
                           onKeyPress={(e) => {
                             if (e.key === 'Enter') {
-                              handleReplaceWord(wordData.word)
+                              handleReplaceWord(wordData)
                             }
                           }}
                         />
@@ -163,7 +167,7 @@ export function SpellCheckSidebar({
                           variant="outline"
                           size="sm"
                           className="flex-1 text-xs h-6 bg-blue-600/80 hover:bg-blue-600 text-white border-blue-600/50"
-                          onClick={() => handleReplaceWord(wordData.word)}
+                          onClick={() => handleReplaceWord(wordData)}
                           disabled={!replacementWords[wordData.word]?.trim()}
                         >
                           Replace

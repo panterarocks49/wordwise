@@ -19,6 +19,7 @@ import { MisspelledWord } from "./remirror-editor"
 import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
 import RemirrorEditor from './remirror-editor'
+import { useRouter } from "next/navigation"
 
 interface DocumentEditorProps {
   document: {
@@ -32,22 +33,28 @@ interface DocumentEditorProps {
 }
 
 export default function DocumentEditor({ document }: DocumentEditorProps) {
+  const router = useRouter()
+  const editorRef = useRef<any>(null)
+  const mountedRef = useRef(false)
+
   const [isSaving, setIsSaving] = useState(false)
   const [isPreview, setIsPreview] = useState(false)
   const [spellCheckSidebarOpen, setSpellCheckSidebarOpen] = useState(true)
   const [saveCount, setSaveCount] = useState(0)
+
+  // Spell check state
   const [spellCheckData, setSpellCheckData] = useState<{
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
   }>({
-    isLoading: true,
+    isLoading: false,
     error: null,
     misspelledWords: []
   })
+
   const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const editorRef = useRef<any>(null)
   const lastSavedTitleRef = useRef(document.title)
   const lastSavedContentRef = useRef(document.content)
   
@@ -62,6 +69,14 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     updateCurrentContent,
     replaceWordInContent
   } = useDocumentStore()
+
+  // Track mounted state
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   // Initialize the current document in the store only once
   useEffect(() => {
@@ -223,34 +238,41 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     }
   }, [document.id]) // Only depend on document.id, not changing values
 
-  // Handle spell check updates - memoized
+  // Handle spell check updates from the extension - memoized
   const handleSpellCheckUpdate = useCallback((data: {
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
   }) => {
+    // Only update state if component is still mounted
+    if (!mountedRef.current) {
+      console.log('📄 DocumentEditor: Component not mounted, skipping spell check update')
+      return
+    }
+    
+    console.log('📄 DocumentEditor: Spell check update received:', {
+      isLoading: data.isLoading,
+      error: data.error,
+      misspelledWordsCount: data.misspelledWords.length,
+      misspelledWords: data.misspelledWords.map(w => ({ word: w.word, position: w.position }))
+    })
     setSpellCheckData(data)
   }, [])
 
   // Handle word replacement from sidebar - memoized
-  const handleWordReplace = useCallback((originalWord: string, replacement: string) => {
-    console.log('Replacing word:', originalWord, 'with:', replacement)
+  const handleWordReplace = useCallback((from: number, to: number, replacement: string) => {
+    console.log('Replacing word at position:', from, 'to', to, 'with:', replacement)
     if (editorRef.current) {
-      // For now, we'll do a simple text replacement
-      const currentContent = editorRef.current.getHTML()
-      const newContent = currentContent.replace(new RegExp(`\\b${originalWord}\\b`, 'gi'), replacement)
-      updateCurrentContent(newContent)
+      editorRef.current.replaceWord(from, to, replacement)
     }
-  }, [updateCurrentContent])
+  }, [])
 
   // Handle ignoring words from sidebar - memoized
   const handleIgnoreWord = useCallback((word: string) => {
     console.log('Ignoring word:', word)
-    // For now, we'll just remove it from the misspelled words list
-    setSpellCheckData(prev => ({
-      ...prev,
-      misspelledWords: prev.misspelledWords.filter(w => w.word !== word)
-    }))
+    if (editorRef.current) {
+      editorRef.current.ignoreWord(word)
+    }
   }, [])
 
   // Memoize preview toggle

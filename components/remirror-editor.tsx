@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState, useEffect } from 'react'
+import { useCallback, useState, useEffect, useRef, useImperativeHandle } from 'react'
 import { 
   Bold, 
   Italic, 
@@ -70,6 +70,7 @@ import { CodeExtension } from '@remirror/extension-code'
 import { CodeMirrorExtension } from '@remirror/extension-codemirror6'
 import { HistoryExtension } from '@remirror/extension-history'
 import { PlaceholderExtension } from '@remirror/extension-placeholder'
+import { SpellCheckExtension } from './spell-check-extension'
 
 export interface MisspelledWord {
   word: string
@@ -368,54 +369,72 @@ const Toolbar = () => {
 }
 
 // Main editor component
-function RemirrorEditor({ content, onChange }: RemirrorEditorProps) {
-  const extensions = useCallback(() => [
-    new BoldExtension({}),
-    new ItalicExtension({}),
-    new UnderlineExtension({}),
-    new StrikeExtension({}),
-    new HeadingExtension({}),
-    new BlockquoteExtension({}),
-    new BulletListExtension({}),
-    new OrderedListExtension({}),
-    new ListItemExtension({}),
-    new HardBreakExtension({}),
-    new LinkExtension({ autoLink: true }),
-    new CodeExtension({}),
-    new CodeMirrorExtension({
-      languages: languages,
-      extensions: [
-        // Highlight special characters
-        highlightSpecialChars(),
-        // History (undo/redo)
-        history(),
-        // Custom selection drawing
-        drawSelection(),
-        // Drop cursor when dragging
-        dropCursor(),
-        // Allow multiple selections
-        EditorState.allowMultipleSelections.of(true),
-        // Auto-indent on input
-        indentOnInput(),
-        // Syntax highlighting
-        syntaxHighlighting(defaultHighlightStyle),
-        // Bracket matching
-        bracketMatching(),
-        // Highlight active line
-        highlightActiveLine(),
-        // Auto-closing brackets
-        closeBrackets(),
-        // Key bindings
-        keymap.of([
-          ...closeBracketsKeymap,
-          ...defaultKeymap,
-          ...historyKeymap
-        ])
-      ]
-    }),
-    new HistoryExtension({}),
-    new PlaceholderExtension({ placeholder: 'Start writing your document...' })
-  ], [])
+function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: RemirrorEditorProps) {
+  const spellCheckExtensionRef = useRef<SpellCheckExtension | null>(null)
+
+  const extensions = useCallback(() => {
+    console.log('📝 RemirrorEditor: Creating extensions...')
+    const spellCheckExtension = new SpellCheckExtension({})
+    spellCheckExtensionRef.current = spellCheckExtension
+    console.log('📝 RemirrorEditor: SpellCheckExtension created:', spellCheckExtension)
+    
+    // Set up the spell check callback
+    if (onSpellCheckUpdate) {
+      console.log('📝 RemirrorEditor: Setting up spell check callback')
+      spellCheckExtension.setUpdateCallback(onSpellCheckUpdate)
+    } else {
+      console.log('📝 RemirrorEditor: No spell check callback provided')
+    }
+
+    return [
+      new BoldExtension({}),
+      new ItalicExtension({}),
+      new UnderlineExtension({}),
+      new StrikeExtension({}),
+      new HeadingExtension({}),
+      new BlockquoteExtension({}),
+      new BulletListExtension({}),
+      new OrderedListExtension({}),
+      new ListItemExtension({}),
+      new HardBreakExtension({}),
+      new LinkExtension({ autoLink: true }),
+      new CodeExtension({}),
+      new CodeMirrorExtension({
+        languages: languages,
+        extensions: [
+          // Highlight special characters
+          highlightSpecialChars(),
+          // History (undo/redo)
+          history(),
+          // Custom selection drawing
+          drawSelection(),
+          // Drop cursor when dragging
+          dropCursor(),
+          // Allow multiple selections
+          EditorState.allowMultipleSelections.of(true),
+          // Auto-indent on input
+          indentOnInput(),
+          // Syntax highlighting
+          syntaxHighlighting(defaultHighlightStyle),
+          // Bracket matching
+          bracketMatching(),
+          // Highlight active line
+          highlightActiveLine(),
+          // Auto-closing brackets
+          closeBrackets(),
+          // Key bindings
+          keymap.of([
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...historyKeymap
+          ])
+        ]
+      }),
+      new HistoryExtension({}),
+      new PlaceholderExtension({ placeholder: 'Start writing your document...' }),
+      spellCheckExtension
+    ]
+  }, [onSpellCheckUpdate])
 
   const { manager, state } = useRemirror({ 
     extensions, 
@@ -425,7 +444,7 @@ function RemirrorEditor({ content, onChange }: RemirrorEditorProps) {
 
   const handleChange = useCallback((parameter: any) => {
     const html = parameter.helpers.getHTML(parameter.state)
-    console.log('RemirrorEditor - Content changed:', {
+    console.log('📝 RemirrorEditor - Content changed:', {
       htmlLength: html.length,
       htmlPreview: html.substring(0, 100) + '...',
       timestamp: new Date().toISOString()
@@ -433,9 +452,35 @@ function RemirrorEditor({ content, onChange }: RemirrorEditorProps) {
     onChange(html)
   }, [onChange])
 
+  // Expose spell check methods through ref
+  useImperativeHandle(editorRef, () => ({
+    ignoreWord: (word: string) => {
+      console.log('📝 RemirrorEditor: ignoreWord called:', word)
+      spellCheckExtensionRef.current?.ignoreWord(word)
+    },
+    replaceWord: (from: number, to: number, replacement: string) => {
+      console.log('📝 RemirrorEditor: replaceWord called:', { from, to, replacement })
+      spellCheckExtensionRef.current?.replaceWord(from, to, replacement)
+    },
+    toggleSpellCheck: () => {
+      console.log('📝 RemirrorEditor: toggleSpellCheck called')
+      spellCheckExtensionRef.current?.toggleSpellCheck()
+    },
+    getMisspelledWords: () => {
+      const words = spellCheckExtensionRef.current?.getMisspelledWords() || []
+      console.log('📝 RemirrorEditor: getMisspelledWords called, returning:', words)
+      return words
+    },
+    isSpellCheckEnabled: () => {
+      const enabled = spellCheckExtensionRef.current?.isSpellCheckEnabled() ?? true
+      console.log('📝 RemirrorEditor: isSpellCheckEnabled called, returning:', enabled)
+      return enabled
+    }
+  }), [])
+
   return (
     <ThemeProvider>
-      <div className="border border-gray-300 rounded-lg bg-white text-black">
+      <div className="bg-white text-black">
         <style jsx global>{`
           .ProseMirror {
             color: #000000 !important;
@@ -446,6 +491,7 @@ function RemirrorEditor({ content, onChange }: RemirrorEditorProps) {
             min-height: 0px;
             max-width: none;
             position: relative;
+            spellcheck: false !important;
           }
           
           .ProseMirror p {
@@ -511,7 +557,16 @@ function RemirrorEditor({ content, onChange }: RemirrorEditorProps) {
           }
 
           .ProseMirror-focused {
-            outline: none;
+            outline: none !important;
+          }
+
+          /* Spell check error styling */
+          .spell-error {
+            text-decoration: underline;
+            text-decoration-color: #ef4444;
+            text-decoration-style: wavy;
+            text-decoration-thickness: 2px;
+            text-underline-offset: 2px;
           }
 
           /* CodeMirror specific styles */
@@ -570,6 +625,9 @@ function RemirrorEditor({ content, onChange }: RemirrorEditorProps) {
           manager={manager} 
           initialContent={state}
           onChange={handleChange}
+          attributes={{
+            spellcheck: 'false'
+          }}
         >
           <Toolbar />
           <div className="relative">
