@@ -64,18 +64,83 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
   }
 
   const getPreview = (content: string) => {
-    // Remove markdown formatting and get first 100 characters
-    const plainText = content
-      .replace(/#{1,6}\s+/g, '') // Remove headers
-      .replace(/\*\*([^*]*)\*\*/g, '$1') // Remove bold
-      .replace(/\*([^*]*)\*/g, '$1') // Remove italic
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // Remove links
-      .replace(/```[\s\S]*?```/g, '[Code Block]') // Replace code blocks
-      .replace(/`([^`]*)`/g, '$1') // Remove inline code
-      .replace(/\n+/g, ' ') // Replace newlines with spaces
-      .trim()
+    if (!content) return 'Empty document'
     
-    return plainText.length > 100 ? plainText.substring(0, 100) + '...' : plainText
+    try {
+      // Try to parse as JSON (Remirror document)
+      const doc = JSON.parse(content)
+      
+      if (doc && typeof doc === 'object') {
+        // Extract text from Remirror/ProseMirror JSON document
+        const extractTextFromNode = (node: any): string => {
+          if (!node) return ''
+          
+          let text = ''
+          
+          // If it's a text node, return the text
+          if (node.type === 'text' && node.text) {
+            return node.text
+          }
+          
+          // If the node has direct text property (some node types)
+          if (node.text && typeof node.text === 'string') {
+            return node.text
+          }
+          
+          // If it has content (array of child nodes), process them recursively
+          if (node.content && Array.isArray(node.content)) {
+            const childTexts = node.content.map(extractTextFromNode).filter((t: string) => t.length > 0)
+            
+            // Add spacing for block elements
+            if (node.type && ['paragraph', 'heading', 'blockquote', 'listItem'].includes(node.type)) {
+              return childTexts.join('') + (childTexts.length > 0 ? '\n' : '')
+            } else {
+              return childTexts.join('')
+            }
+          }
+          
+          // Handle case where content might be at the root level
+          if (Array.isArray(node)) {
+            return node.map(extractTextFromNode).join('')
+          }
+          
+          return text
+        }
+        
+        // Start extraction from the document
+        let plainText = ''
+        
+        // Handle different possible document structures
+        if (doc.content) {
+          plainText = extractTextFromNode(doc)
+        } else if (doc.type) {
+          plainText = extractTextFromNode(doc)
+        } else if (Array.isArray(doc)) {
+          plainText = doc.map(extractTextFromNode).join('')
+        } else {
+          // Try to extract from any property that might contain content
+          for (const key of Object.keys(doc)) {
+            const value = doc[key]
+            if (value && (Array.isArray(value) || (typeof value === 'object' && value.type))) {
+              plainText += extractTextFromNode(value)
+            }
+          }
+        }
+        
+        plainText = plainText.trim()
+        
+        if (plainText.length > 0) {
+          return plainText.length > 100 ? plainText.substring(0, 100) + '...' : plainText
+        }
+      }
+    } catch (e) {
+      // If JSON parsing fails, treat as plain text (fallback)
+      console.warn('Failed to parse document content as JSON:', e)
+    }
+    
+    // Fallback for non-JSON content
+    const plainText = content.trim()
+    return plainText.length > 100 ? plainText.substring(0, 100) + '...' : plainText || 'Empty document'
   }
 
   const handleCreateDocument = async () => {

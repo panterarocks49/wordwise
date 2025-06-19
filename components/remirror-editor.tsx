@@ -57,6 +57,7 @@ import {
   closeBracketsKeymap
 } from '@codemirror/autocomplete'
 import { EditorState } from '@codemirror/state'
+import { dracula } from 'thememirror'
 import { BoldExtension } from '@remirror/extension-bold'
 import { ItalicExtension } from '@remirror/extension-italic'
 import { UnderlineExtension } from '@remirror/extension-underline'
@@ -108,8 +109,8 @@ const ToolbarButton = ({
     onClick={onClick}
     disabled={disabled}
     title={title}
-    className={`p-2 rounded hover:bg-gray-100 transition-colors ${
-      isActive ? 'bg-blue-100 text-blue-600' : 'text-gray-600'
+    className={`p-2 rounded hover:bg-accent hover:text-accent-foreground transition-colors ${
+      isActive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'
     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
   >
     <Icon size={16} />
@@ -229,7 +230,7 @@ const CodeBlockToolbar = () => {
 
   return (
     <div 
-      className="absolute bg-white border border-gray-200 rounded-md shadow-sm px-2 py-1 flex items-center gap-2 text-xs z-20 pointer-events-auto"
+      className="absolute bg-card border border-border rounded-md shadow-sm px-2 py-1 flex items-center gap-2 text-xs z-20 pointer-events-auto"
       style={{
         top: `${position.top}px`,
         right: `${position.right}px`
@@ -237,12 +238,12 @@ const CodeBlockToolbar = () => {
       onMouseEnter={() => setIsInteracting(true)}
       onMouseLeave={() => setIsInteracting(false)}
     >
-      <Code2 size={12} className="text-gray-500" />
+      <Code2 size={12} className="text-muted-foreground" />
       <div className="relative">
         <select
           value={currentLanguage}
           onChange={(e) => handleLanguageChange(e.target.value)}
-          className="border-0 bg-transparent text-xs focus:outline-none pr-4 cursor-pointer"
+          className="border-0 bg-transparent text-xs focus:outline-none pr-4 cursor-pointer text-foreground"
           onFocus={() => setIsInteracting(true)}
           onBlur={() => {
             // Delay hiding to allow for option selection
@@ -260,109 +261,174 @@ const CodeBlockToolbar = () => {
             </option>
           ))}
         </select>
-        <ChevronDown size={10} className="absolute right-0 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" />
+        <ChevronDown size={10} className="absolute right-0 top-1/2 transform -translate-y-1/2 text-muted-foreground pointer-events-none" />
       </div>
     </div>
   )
 }
 
-// Toolbar component inside Remirror context
-const Toolbar = () => {
-  const { commands, active } = useRemirrorContext({ autoUpdate: true })
-  
+// Floating Toolbar component that can be used outside Remirror context
+const FloatingToolbar = ({ manager }: { manager: any }) => {
+  const [active, setActive] = useState<any>({})
+  const [commands, setCommands] = useState<any>({})
+
+  useEffect(() => {
+    if (!manager || !manager.view) return
+
+    const updateState = () => {
+      const view = manager.view
+      if (!view) return
+
+      const state = view.state
+      const { $from } = state.selection
+
+      // Get active states
+      const activeStates = {
+        bold: state.schema.marks.bold && state.schema.marks.bold.isInSet(state.storedMarks || $from.marks()),
+        italic: state.schema.marks.italic && state.schema.marks.italic.isInSet(state.storedMarks || $from.marks()),
+        underline: state.schema.marks.underline && state.schema.marks.underline.isInSet(state.storedMarks || $from.marks()),
+        strike: state.schema.marks.strike && state.schema.marks.strike.isInSet(state.storedMarks || $from.marks()),
+        heading: $from.parent.type.name === 'heading' ? { level: $from.parent.attrs.level } : null,
+        bulletList: $from.parent.type.name === 'listItem' && $from.node(-1).type.name === 'bulletList',
+        orderedList: $from.parent.type.name === 'listItem' && $from.node(-1).type.name === 'orderedList',
+        blockquote: $from.parent.type.name === 'blockquote'
+      }
+
+      setActive(activeStates)
+
+      // Get commands from manager
+      const managerCommands = {
+        toggleBold: () => manager.store.commands.toggleBold(),
+        toggleItalic: () => manager.store.commands.toggleItalic(),
+        toggleUnderline: () => manager.store.commands.toggleUnderline(),
+        toggleStrike: () => manager.store.commands.toggleStrike(),
+        toggleHeading: (attrs: any) => manager.store.commands.toggleHeading(attrs),
+        toggleBulletList: () => manager.store.commands.toggleBulletList(),
+        toggleOrderedList: () => manager.store.commands.toggleOrderedList(),
+        toggleBlockquote: () => manager.store.commands.toggleBlockquote(),
+        createCodeMirror: (attrs: any) => manager.store.commands.createCodeMirror(attrs),
+        undo: () => manager.store.commands.undo(),
+        redo: () => manager.store.commands.redo()
+      }
+
+      setCommands(managerCommands)
+    }
+
+    // Initial update
+    updateState()
+
+    // Listen to state changes
+    const view = manager.view
+    if (view) {
+      const originalDispatch = view.dispatch
+      view.dispatch = (tr: any) => {
+        originalDispatch.call(view, tr)
+        setTimeout(updateState, 0) // Update after transaction
+      }
+
+      return () => {
+        view.dispatch = originalDispatch
+      }
+    }
+  }, [manager])
+
+  if (!manager || !commands.toggleBold) {
+    return null
+  }
+
   return (
-    <div className="border-b border-gray-200 bg-gray-50 p-3 flex flex-wrap items-center gap-1">
-      {/* Text Formatting */}
-      <div className="flex items-center gap-1 mr-4">
-        <ToolbarButton
-          icon={Bold}
-          isActive={active.bold?.({})}
-          onClick={() => commands.toggleBold()}
-          title="Bold (Ctrl+B)"
-        />
-        <ToolbarButton
-          icon={Italic}
-          isActive={active.italic?.({})}
-          onClick={() => commands.toggleItalic()}
-          title="Italic (Ctrl+I)"
-        />
-        <ToolbarButton
-          icon={Underline}
-          isActive={active.underline?.({})}
-          onClick={() => commands.toggleUnderline()}
-          title="Underline (Ctrl+U)"
-        />
-        <ToolbarButton
-          icon={Strikethrough}
-          isActive={active.strike?.({})}
-          onClick={() => commands.toggleStrike()}
-          title="Strikethrough"
-        />
-      </div>
+    <div className="bg-muted/30 p-3">
+      <div className="flex flex-wrap items-center gap-1 justify-center">
+        {/* Text Formatting */}
+        <div className="flex items-center gap-1 mr-4">
+          <ToolbarButton
+            icon={Bold}
+            isActive={active.bold}
+            onClick={() => commands.toggleBold()}
+            title="Bold (Ctrl+B)"
+          />
+          <ToolbarButton
+            icon={Italic}
+            isActive={active.italic}
+            onClick={() => commands.toggleItalic()}
+            title="Italic (Ctrl+I)"
+          />
+          <ToolbarButton
+            icon={Underline}
+            isActive={active.underline}
+            onClick={() => commands.toggleUnderline()}
+            title="Underline (Ctrl+U)"
+          />
+          <ToolbarButton
+            icon={Strikethrough}
+            isActive={active.strike}
+            onClick={() => commands.toggleStrike()}
+            title="Strikethrough"
+          />
+        </div>
 
-      {/* Headings */}
-      <div className="flex items-center gap-1 mr-4">
-        <ToolbarButton
-          icon={Heading1}
-          isActive={active.heading?.({ level: 1 })}
-          onClick={() => commands.toggleHeading({ level: 1 })}
-          title="Heading 1"
-        />
-        <ToolbarButton
-          icon={Heading2}
-          isActive={active.heading?.({ level: 2 })}
-          onClick={() => commands.toggleHeading({ level: 2 })}
-          title="Heading 2"
-        />
-        <ToolbarButton
-          icon={Heading3}
-          isActive={active.heading?.({ level: 3 })}
-          onClick={() => commands.toggleHeading({ level: 3 })}
-          title="Heading 3"
-        />
-      </div>
+        {/* Headings */}
+        <div className="flex items-center gap-1 mr-4">
+          <ToolbarButton
+            icon={Heading1}
+            isActive={active.heading?.level === 1}
+            onClick={() => commands.toggleHeading({ level: 1 })}
+            title="Heading 1"
+          />
+          <ToolbarButton
+            icon={Heading2}
+            isActive={active.heading?.level === 2}
+            onClick={() => commands.toggleHeading({ level: 2 })}
+            title="Heading 2"
+          />
+          <ToolbarButton
+            icon={Heading3}
+            isActive={active.heading?.level === 3}
+            onClick={() => commands.toggleHeading({ level: 3 })}
+            title="Heading 3"
+          />
+        </div>
 
-      {/* Lists and Quote */}
-      <div className="flex items-center gap-1 mr-4">
-        <ToolbarButton
-          icon={List}
-          isActive={active.bulletList?.({})}
-          onClick={() => commands.toggleBulletList()}
-          title="Bullet List"
-        />
-        <ToolbarButton
-          icon={ListOrdered}
-          isActive={active.orderedList?.({})}
-          onClick={() => commands.toggleOrderedList()}
-          title="Numbered List"
-        />
-        <ToolbarButton
-          icon={Quote}
-          isActive={active.blockquote?.({})}
-          onClick={() => commands.toggleBlockquote()}
-          title="Quote"
-        />
-        <ToolbarButton
-          icon={Code2}
-          onClick={() => commands.createCodeMirror({ language: 'javascript' })}
-          title="Code Block"
-        />
-      </div>
+        {/* Lists and Quote */}
+        <div className="flex items-center gap-1 mr-4">
+          <ToolbarButton
+            icon={List}
+            isActive={active.bulletList}
+            onClick={() => commands.toggleBulletList()}
+            title="Bullet List"
+          />
+          <ToolbarButton
+            icon={ListOrdered}
+            isActive={active.orderedList}
+            onClick={() => commands.toggleOrderedList()}
+            title="Numbered List"
+          />
+          <ToolbarButton
+            icon={Quote}
+            isActive={active.blockquote}
+            onClick={() => commands.toggleBlockquote()}
+            title="Quote"
+          />
+          <ToolbarButton
+            icon={Code2}
+            onClick={() => commands.createCodeMirror({ language: 'javascript' })}
+            title="Code Block"
+          />
+        </div>
 
-      {/* History */}
-      <div className="flex items-center gap-1">
-        <ToolbarButton
-          icon={Undo}
-          onClick={() => commands.undo()}
-          title="Undo (Ctrl+Z)"
-          disabled={!commands.undo.enabled?.()}
-        />
-        <ToolbarButton
-          icon={Redo}
-          onClick={() => commands.redo()}
-          title="Redo (Ctrl+Y)"
-          disabled={!commands.redo.enabled?.()}
-        />
+        {/* History */}
+        <div className="flex items-center gap-1">
+          <ToolbarButton
+            icon={Undo}
+            onClick={() => commands.undo()}
+            title="Undo (Ctrl+Z)"
+          />
+          <ToolbarButton
+            icon={Redo}
+            onClick={() => commands.redo()}
+            title="Redo (Ctrl+Y)"
+          />
+        </div>
       </div>
     </div>
   )
@@ -373,17 +439,12 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
   const spellCheckExtensionRef = useRef<SpellCheckExtension | null>(null)
 
   const extensions = useCallback(() => {
-    console.log('📝 RemirrorEditor: Creating extensions...')
     const spellCheckExtension = new SpellCheckExtension({})
     spellCheckExtensionRef.current = spellCheckExtension
-    console.log('📝 RemirrorEditor: SpellCheckExtension created:', spellCheckExtension)
     
     // Set up the spell check callback
     if (onSpellCheckUpdate) {
-      console.log('📝 RemirrorEditor: Setting up spell check callback')
       spellCheckExtension.setUpdateCallback(onSpellCheckUpdate)
-    } else {
-      console.log('📝 RemirrorEditor: No spell check callback provided')
     }
 
     return [
@@ -402,26 +463,55 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
       new CodeMirrorExtension({
         languages: languages,
         extensions: [
+          // Dark theme
+          dracula,
           // Highlight special characters
           highlightSpecialChars(),
           // History (undo/redo)
           history(),
-          // Custom selection drawing
-          drawSelection(),
           // Drop cursor when dragging
           dropCursor(),
           // Allow multiple selections
           EditorState.allowMultipleSelections.of(true),
           // Auto-indent on input
           indentOnInput(),
-          // Syntax highlighting
-          syntaxHighlighting(defaultHighlightStyle),
           // Bracket matching
           bracketMatching(),
-          // Highlight active line
-          highlightActiveLine(),
           // Auto-closing brackets
           closeBrackets(),
+          // Custom theme overrides
+          EditorView.theme({
+            '&': {
+              backgroundColor: 'hsl(var(--muted))',
+            },
+            '.cm-content': {
+              padding: '16px',
+              backgroundColor: 'hsl(var(--muted))',
+            },
+            '.cm-focused': {
+              outline: 'none',
+            },
+            '.cm-editor': {
+              fontSize: '14px',
+              backgroundColor: 'hsl(var(--muted))',
+            },
+            '.cm-scroller': {
+              fontFamily: '"SF Mono", "Monaco", "Inconsolata", "Roboto Mono", "Consolas", monospace',
+              backgroundColor: 'hsl(var(--muted))',
+            },
+            '.cm-gutters': {
+              backgroundColor: 'hsl(var(--muted))',
+              borderRight: '1px solid hsl(var(--border))',
+            },
+            '.cm-selectionBackground': {
+              backgroundColor: '#3b82f6 !important',
+              opacity: '0.3 !important',
+            },
+            '&.cm-focused .cm-selectionBackground': {
+              backgroundColor: '#3b82f6 !important',
+              opacity: '0.4 !important',
+            },
+          }),
           // Key bindings
           keymap.of([
             ...closeBracketsKeymap,
@@ -438,52 +528,65 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
 
   const { manager, state } = useRemirror({ 
     extensions, 
-    content,
-    stringHandler: 'html'
+    content: (() => {
+      if (!content) return undefined
+      
+      // Try to parse as JSON first (for saved Remirror content)
+      try {
+        const parsed = JSON.parse(content)
+        // Check if it looks like a Remirror JSON document
+        if (parsed && typeof parsed === 'object' && parsed.type) {
+          return parsed
+        }
+      } catch (e) {
+        // Not JSON, continue to treat as string
+      }
+      
+      // Fallback to treating as string content (markdown/HTML/plain text)
+      return content
+    })(),
+    stringHandler: 'html', // Use HTML handler for string content
   })
 
   const handleChange = useCallback((parameter: any) => {
-    const html = parameter.helpers.getHTML(parameter.state)
-    console.log('📝 RemirrorEditor - Content changed:', {
-      htmlLength: html.length,
-      htmlPreview: html.substring(0, 100) + '...',
-      timestamp: new Date().toISOString()
-    })
-    onChange(html)
+    const json = parameter.helpers.getJSON(parameter.state)
+    onChange(JSON.stringify(json))
   }, [onChange])
 
   // Expose spell check methods through ref
   useImperativeHandle(editorRef, () => ({
     ignoreWord: (word: string) => {
-      console.log('📝 RemirrorEditor: ignoreWord called:', word)
       spellCheckExtensionRef.current?.ignoreWord(word)
     },
     replaceWord: (from: number, to: number, replacement: string) => {
-      console.log('📝 RemirrorEditor: replaceWord called:', { from, to, replacement })
       spellCheckExtensionRef.current?.replaceWord(from, to, replacement)
     },
     toggleSpellCheck: () => {
-      console.log('📝 RemirrorEditor: toggleSpellCheck called')
       spellCheckExtensionRef.current?.toggleSpellCheck()
     },
     getMisspelledWords: () => {
       const words = spellCheckExtensionRef.current?.getMisspelledWords() || []
-      console.log('📝 RemirrorEditor: getMisspelledWords called, returning:', words)
       return words
     },
     isSpellCheckEnabled: () => {
       const enabled = spellCheckExtensionRef.current?.isSpellCheckEnabled() ?? true
-      console.log('📝 RemirrorEditor: isSpellCheckEnabled called, returning:', enabled)
       return enabled
-    }
-  }), [])
+    },
+    getManager: () => manager // Expose manager for toolbar
+  }), [manager])
 
   return (
     <ThemeProvider>
-      <div className="bg-white text-black">
+      <div className="text-card-foreground">
         <style jsx global>{`
+          /* Remove padding from remirror-editor-wrapper */
+          .remirror-editor-wrapper {
+            padding-top: 0 !important;
+          }
+          
           .ProseMirror {
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
+            background-color: transparent !important;
             padding: 1.5rem;
             outline: none;
             font-size: 16px;
@@ -492,15 +595,20 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
             max-width: none;
             position: relative;
             spellcheck: false !important;
+            box-shadow: none !important;
+          }
+          
+          .remirror-theme .ProseMirror {
+            box-shadow: none !important;
           }
           
           .ProseMirror p {
             margin: 0 0 1em 0;
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
           }
           
           .ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 {
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
             font-weight: bold;
             margin: 1.5em 0 0.5em 0;
           }
@@ -510,50 +618,64 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
           .ProseMirror h3 { font-size: 1.25em; }
           
           .ProseMirror strong {
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
             font-weight: bold;
           }
           
           .ProseMirror em {
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
             font-style: italic;
           }
           
           .ProseMirror ul, .ProseMirror ol {
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
             padding-left: 1.5em;
             margin: 1em 0;
+            list-style: revert !important;
+          }
+          
+          .ProseMirror ul {
+            list-style-type: disc !important;
+          }
+          
+          .ProseMirror ol {
+            list-style-type: decimal !important;
           }
           
           .ProseMirror li {
-            color: #000000 !important;
+            color: hsl(var(--foreground)) !important;
             margin: 0.25em 0;
+            display: list-item !important;
           }
           
           .ProseMirror blockquote {
-            color: #666666 !important;
-            border-left: 4px solid #e5e7eb;
+            color: hsl(var(--muted-foreground)) !important;
+            border-left: 4px solid hsl(var(--border));
             padding-left: 1em;
             margin: 1em 0;
             font-style: italic;
+            background-color: hsl(var(--muted) / 0.3);
+            padding: 1em;
+            border-radius: 0.5em;
           }
           
           .ProseMirror code {
-            background-color: #f3f4f6;
-            color: #1f2937 !important;
+            background-color: hsl(var(--muted));
+            color: hsl(var(--muted-foreground)) !important;
             padding: 0.125em 0.25em;
             border-radius: 0.25rem;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 0.875em;
+            border: 1px solid hsl(var(--border));
           }
           
           .ProseMirror a {
-            color: #2563eb !important;
+            color: #2b725e !important;
             text-decoration: underline;
           }
           
           .ProseMirror a:hover {
-            color: #1d4ed8 !important;
+            color: #235e4c !important;
           }
 
           .ProseMirror-focused {
@@ -572,52 +694,21 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
           /* CodeMirror specific styles */
           .cm-editor {
             border-radius: 0.5rem;
-            border: 1px solid #d1d5db;
+            border: 1px solid hsl(var(--border));
             margin: 1.5em 0;
             position: relative;
-            background-color: #f6f8fa;
-            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
           }
           
           .cm-editor.cm-focused {
-            border-color: #3b82f6;
+            border-color: #2b725e;
             outline: none;
-            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05), 0 0 0 1px #3b82f6;
-          }
-          
-          /* More specific selector to override CodeMirror defaults */
-          .cm-editor .cm-content {
-            padding: 16px !important;
-
-          }
-
-          .cm-scroller {
-            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', monospace;
-            font-size: 14px;
-            line-height: 1.6;
-          }
-
-          .cm-line {
-            padding: 0.125rem 0;
-          }
-
-          .cm-activeLine {
-            background-color: transparent !important;
-          }
-
-          .cm-selectionBackground {
-            background-color: #3b82f6 !important;
-            opacity: 0.2;
-          }
-
-          /* Ensure floating toolbar is positioned correctly */
-          .ProseMirror {
-            position: relative;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1), 0 0 0 1px #2b725e;
           }
           
           /* Hover effect for code blocks to make language selector more discoverable */
           .cm-editor:hover {
-            border-color: #9ca3af;
+            border-color: #2b725e;
           }
         `}</style>
         
@@ -629,7 +720,6 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
             spellcheck: 'false'
           }}
         >
-          <Toolbar />
           <div className="relative">
             <EditorComponent />
             <CodeBlockToolbar />
@@ -640,4 +730,6 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
   )
 }
 
-export default RemirrorEditor 
+// Export both the editor and toolbar separately
+export default RemirrorEditor
+export { FloatingToolbar } 

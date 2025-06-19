@@ -18,7 +18,7 @@ import { useDocumentStore } from "@/lib/stores/document-store"
 import { MisspelledWord } from "./remirror-editor"
 import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
-import RemirrorEditor from './remirror-editor'
+import RemirrorEditor, { FloatingToolbar } from './remirror-editor'
 import { useRouter } from "next/navigation"
 
 interface DocumentEditorProps {
@@ -36,6 +36,7 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const router = useRouter()
   const editorRef = useRef<any>(null)
   const mountedRef = useRef(false)
+  const [editorManager, setEditorManager] = useState<any>(null)
 
   const [isSaving, setIsSaving] = useState(false)
   const [isPreview, setIsPreview] = useState(false)
@@ -293,74 +294,102 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     editorRef
   }), [content, updateCurrentContent, handleSpellCheckUpdate])
 
+  // Get the manager from the editor when it's ready
+  useEffect(() => {
+    const checkForManager = () => {
+      if (editorRef.current && editorRef.current.getManager) {
+        const manager = editorRef.current.getManager()
+        if (manager && manager !== editorManager) {
+          console.log('📝 DocumentEditor: Manager found and set:', manager)
+          setEditorManager(manager)
+          return true
+        }
+      }
+      return false
+    }
+
+    // Try immediately
+    if (checkForManager()) return
+
+    // If not found, poll every 100ms for up to 3 seconds
+    let attempts = 0
+    const maxAttempts = 30
+    const interval = setInterval(() => {
+      attempts++
+      if (checkForManager() || attempts >= maxAttempts) {
+        clearInterval(interval)
+        if (attempts >= maxAttempts) {
+          console.log('📝 DocumentEditor: Manager not found after polling')
+        }
+      }
+    }, 100)
+
+    return () => clearInterval(interval)
+  }, [content, editorManager]) // Re-run when content changes (editor re-mounts)
+
   return (
     <div className="h-screen bg-[#161616] text-white flex">
       {/* Main Editor Area */}
       <div className="flex-1 flex flex-col">
         {/* Fixed Header */}
-        <header className="flex-shrink-0 border-b border-gray-800 pr-12">
-          <div className="container mx-auto px-4 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <Button variant="ghost" size="sm" asChild>
-                  <Link href="/dashboard">
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back to Dashboard
-                  </Link>
-                </Button>
-                <div className="flex items-center space-x-2">
-                  <Input
-                    value={title}
-                    onChange={(e) => updateCurrentTitle(e.target.value)}
-                    onBlur={handleTitleBlur}
-                    className="bg-transparent border-none text-xl font-semibold text-white placeholder:text-gray-500 focus:ring-0 focus:border-none p-0"
-                    placeholder="Document title..."
-                  />
-                </div>
-              </div>
-              <div className="flex items-center space-x-4">
-                <Button onClick={handleManualSave} disabled={isSaving} size="sm">
-                  {isSaving ? (
-                    <>
-                      <Save className="h-4 w-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : !hasChanges ? (
-                    <>
-                      <Check className="h-4 w-4 mr-2" />
-                      Saved
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4 mr-2" />
-                      Save
-                    </>
-                  )}
-                </Button>
-              </div>
+        <header className="flex-shrink-0 pr-12">
+          <div className="flex items-center justify-between px-4 py-4">
+            <div className="flex items-center space-x-4">
+              <Button variant="ghost" size="sm" asChild>
+                <Link href="/dashboard">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Dashboard
+                </Link>
+              </Button>
+              <Input
+                value={title}
+                onChange={(e) => updateCurrentTitle(e.target.value)}
+                onBlur={handleTitleBlur}
+                className="bg-transparent border-none text-xl font-semibold text-white placeholder:text-gray-500 focus:ring-0 focus:border-none p-0"
+                placeholder="Document title..."
+              />
             </div>
+            <Button onClick={handleManualSave} disabled={isSaving} size="sm">
+              {isSaving ? (
+                <>
+                  <Save className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : !hasChanges ? (
+                <>
+                  <Check className="h-4 w-4 mr-2" />
+                  Saved
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4 mr-2" />
+                  Save
+                </>
+              )}
+            </Button>
           </div>
         </header>
 
         {/* Editor Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="container mx-auto px-4 py-8">
-            <div className="bg-white rounded-lg overflow-hidden">
-              {!isPreview ? (
-                <div className="prose prose-lg max-w-none">
-                  <RemirrorEditor 
-                    key={`editor-${document.id}`}
-                    {...editorProps}
-                  />
-                </div>
-              ) : (
-                <div className="p-6 prose prose-lg max-w-none">
-                  <ReactMarkdown>{content}</ReactMarkdown>
-                </div>
-              )}
-            </div>
+        <div className="flex-1 overflow-y-auto px-4 py-8">
+          <div className="max-w-4xl mx-auto">
+            {!isPreview ? (
+              <RemirrorEditor 
+                key={`editor-${document.id}`}
+                {...editorProps}
+              />
+            ) : (
+              <div className="p-6 prose prose-lg max-w-none prose-invert">
+                <ReactMarkdown>{content}</ReactMarkdown>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* Fixed Bottom Toolbar */}
+        {editorManager && !isPreview && (
+          <FloatingToolbar manager={editorManager} />
+        )}
       </div>
       
       {/* Sidebar - Full height, separate column */}
