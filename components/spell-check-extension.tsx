@@ -8,11 +8,31 @@ import { debounce } from 'lodash'
 import { retext } from 'retext'
 import retextEnglish from 'retext-english'
 import retextSpell from 'retext-spell'
+import retextContractions from 'retext-contractions'
+import retextIndefiniteArticle from 'retext-indefinite-article'
+import retextQuotes from 'retext-quotes'
+import retextSentenceSpacing from 'retext-sentence-spacing'
+import retextSmartypants from 'retext-smartypants'
+import retextIntensify from 'retext-intensify'
+import retextSimplify from 'retext-simplify'
+import retextRedundantAcronyms from 'retext-redundant-acronyms'
+import retextRepeatedWords from 'retext-repeated-words'
+import retextReadability from 'retext-readability'
+import retextPassive from 'retext-passive'
+import retextPos from 'retext-pos'
+import retextSyntaxUrls from 'retext-syntax-urls'
+import retextSyntaxMentions from 'retext-syntax-mentions'
+
+export type ErrorCategory = 'correctness' | 'clarity'
 
 export interface MisspelledWord {
   word: string
   suggestions: string[]
   position: { from: number, to: number }
+  category: ErrorCategory
+  ruleId: string
+  message: string
+  severity: 'error' | 'warning' | 'info'
 }
 
 export interface SpellCheckOptions {
@@ -20,10 +40,34 @@ export interface SpellCheckOptions {
   debounceMs?: number
   maxSuggestions?: number
   language?: string
+  categories?: {
+    correctness?: boolean
+    clarity?: boolean
+  }
 }
 
 // Plugin key for the spell check plugin
 const spellCheckPluginKey = new PluginKey('spellCheck')
+
+// Category mappings for different rule sources
+const categoryMappings: Record<string, { category: ErrorCategory; severity: 'error' | 'warning' | 'info' }> = {
+  // Correctness - spelling, punctuation, basic grammar
+  'retext-spell': { category: 'correctness', severity: 'error' },
+  'retext-contractions': { category: 'correctness', severity: 'error' },
+  'retext-indefinite-article': { category: 'correctness', severity: 'error' },
+  'retext-quotes': { category: 'correctness', severity: 'warning' },
+  'retext-sentence-spacing': { category: 'correctness', severity: 'warning' },
+  'retext-smartypants': { category: 'correctness', severity: 'info' },
+  
+  // Clarity - conciseness, readability, style
+  'retext-intensify': { category: 'clarity', severity: 'warning' },
+  'retext-simplify': { category: 'clarity', severity: 'warning' },
+  'retext-redundant-acronyms': { category: 'clarity', severity: 'warning' },
+  'retext-repeated-words': { category: 'clarity', severity: 'warning' },
+  'retext-readability': { category: 'clarity', severity: 'info' },
+  'retext-passive': { category: 'clarity', severity: 'info' },
+  'retext-pos': { category: 'clarity', severity: 'info' },
+}
 
 export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   private spellChecker: any = null
@@ -35,7 +79,13 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
+    categorizedErrors: {
+      correctness: MisspelledWord[]
+      clarity: MisspelledWord[]
+    }
   }) => void
+  private onFocusChangeCallback?: (wordId: string | null) => void
+  private focusedWordId: string | null = null
 
   get name() {
     return 'spellCheck' as const
@@ -47,20 +97,28 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       enabled: true,
       debounceMs: 500,
       maxSuggestions: 5,
-      language: 'en'
+      language: 'en',
+      categories: {
+        correctness: true,
+        clarity: true
+      }
     }
   }
 
   // Load dictionary and initialize retext processor
   private async loadDictionary(): Promise<void> {
-    console.log('🔍 SpellCheck: Starting retext processor initialization...')
+    console.log('🔍 SpellCheck: Starting comprehensive retext processor initialization...')
     try {
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
         this.onUpdateCallback?.({
           isLoading: true,
           error: null,
-          misspelledWords: []
+          misspelledWords: [],
+          categorizedErrors: {
+            correctness: [],
+            clarity: []
+          }
         })
       }, 0)
 
@@ -83,13 +141,31 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       // Create dictionary object compatible with retext-spell
       this.dictionary = { aff, dic }
 
-      // Create retext processor with English parser and spell checker
-      console.log('🔍 SpellCheck: Creating retext processor...')
+      // Create comprehensive retext processor with all plugins
+      console.log('🔍 SpellCheck: Creating comprehensive retext processor...')
       this.spellChecker = retext()
         .use(retextEnglish)
+        .use(retextSyntaxUrls) // Handle URLs first
+        .use(retextSyntaxMentions) // Handle @mentions
+        .use(retextPos) // Add part-of-speech tags
+        
+        // Correctness plugins
         .use(retextSpell, this.dictionary)
+        .use(retextContractions)
+        .use(retextIndefiniteArticle)
+        .use(retextQuotes)
+        .use(retextSentenceSpacing)
+        .use(retextSmartypants)
+        
+        // Clarity plugins
+        .use(retextIntensify)
+        .use(retextSimplify)
+        .use(retextRedundantAcronyms)
+        .use(retextRepeatedWords)
+        .use(retextReadability)
+        .use(retextPassive)
 
-      console.log('🔍 SpellCheck: Retext processor created successfully')
+      console.log('🔍 SpellCheck: Comprehensive retext processor created successfully')
       
       // Test the spell checker
       await this.testSpellChecker()
@@ -99,7 +175,11 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         this.onUpdateCallback?.({
           isLoading: false,
           error: null,
-          misspelledWords: []
+          misspelledWords: [],
+          categorizedErrors: {
+            correctness: [],
+            clarity: []
+          }
         })
       }, 0)
 
@@ -125,7 +205,11 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         this.onUpdateCallback?.({
           isLoading: false,
           error: `Failed to load spell check dictionary: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          misspelledWords: []
+          misspelledWords: [],
+          categorizedErrors: {
+            correctness: [],
+            clarity: []
+          }
         })
       }, 0)
     }
@@ -134,14 +218,16 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   // Test the spell checker with some sample words
   private async testSpellChecker() {
     try {
-      const testText = 'This is a test with a mispelled word.'
+      const testText = 'This is a test with a mispelled word and some weasel words like "very" and "really". We should utilize this instead of use this. The ATM machine is over there.'
       const file = await this.spellChecker.process(testText)
       
-      console.log('🔍 SpellCheck: Testing spell checker:', {
+      console.log('🔍 SpellCheck: Testing comprehensive spell checker:', {
         testText,
         messagesCount: file.messages.length,
         messages: file.messages.map((msg: any) => ({
           message: msg.message,
+          source: msg.source,
+          ruleId: msg.ruleId,
           actual: msg.actual,
           expected: msg.expected,
           line: msg.line,
@@ -151,6 +237,28 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     } catch (error) {
       console.error('🔍 SpellCheck: Test failed:', error)
     }
+  }
+
+  // Categorize errors into the two main categories
+  private categorizeErrors(misspelledWords: MisspelledWord[]) {
+    const categorizedErrors = {
+      correctness: [] as MisspelledWord[],
+      clarity: [] as MisspelledWord[]
+    }
+
+    misspelledWords.forEach(word => {
+      categorizedErrors[word.category].push(word)
+    })
+
+    console.log('🔍 SpellCheck: Categorization results:', {
+      totalWords: misspelledWords.length,
+      correctness: categorizedErrors.correctness.length,
+      clarity: categorizedErrors.clarity.length,
+      correctnessWords: categorizedErrors.correctness.map(w => w.word),
+      clarityWords: categorizedErrors.clarity.map(w => w.word)
+    })
+
+    return categorizedErrors
   }
 
   // Debounced spell check function - now with change tracking
@@ -173,7 +281,11 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       this.onUpdateCallback?.({
         isLoading: true,
         error: null,
-        misspelledWords: []
+        misspelledWords: [],
+        categorizedErrors: {
+          correctness: [],
+          clarity: []
+        }
       })
     }, 0)
 
@@ -181,17 +293,19 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       const misspelledWords = await this.performSpellCheck(doc, changedRanges)
       console.log('🔍 SpellCheck: Spell check completed:', {
         misspelledCount: misspelledWords.length,
-        misspelledWords: misspelledWords.map(w => ({ word: w.word, position: w.position }))
+        misspelledWords: misspelledWords.map(w => ({ word: w.word, position: w.position, category: w.category }))
       })
       
       this.misspelledWords = misspelledWords
+      const categorizedErrors = this.categorizeErrors(misspelledWords)
       
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
         this.onUpdateCallback?.({
           isLoading: false,
           error: null,
-          misspelledWords
+          misspelledWords,
+          categorizedErrors
         })
       }, 0)
 
@@ -212,7 +326,11 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         this.onUpdateCallback?.({
           isLoading: false,
           error: 'Spell check failed',
-          misspelledWords: []
+          misspelledWords: [],
+          categorizedErrors: {
+            correctness: [],
+            clarity: []
+          }
         })
       }, 0)
     }
@@ -273,7 +391,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
   // Perform spell check on text using retext - now optimized for changed content
   private async performSpellCheck(doc: any, changedRanges?: Array<{ from: number, to: number }>): Promise<MisspelledWord[]> {
-    console.log('🔍 SpellCheck: Performing optimized spell check')
+    console.log('🔍 SpellCheck: Performing comprehensive optimized spell check')
 
     const allMisspelledWords: MisspelledWord[] = []
     const paragraphsToCheck: Array<{ node: any, pos: number, text: string }> = []
@@ -331,28 +449,62 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       // Process batch
       for (const { node, pos, text } of batch) {
         try {
-          // Use the shared processor (don't create a new one each time)
+          // Use the comprehensive processor
           const file = await this.spellChecker.process(text)
           const paragraphWords: MisspelledWord[] = []
           
-          // Process retext messages (spell check errors)
+          // Process retext messages from all plugins
           for (const message of file.messages) {
-            if (message.source === 'retext-spell' && message.actual && message.expected) {
-              // Calculate position in the original document
-              const wordStart = pos + 1 + (message.column ? message.column - 1 : 0) // +1 for paragraph node
-              const wordEnd = wordStart + message.actual.length
+            const source = message.source || 'unknown'
+            const ruleId = message.ruleId || source
+            const categoryInfo = categoryMappings[source] || { category: 'correctness', severity: 'warning' }
+            
+            // Debug logging to see what's happening
+            console.log('🔍 SpellCheck: Processing message:', {
+              source,
+              ruleId,
+              categoryInfo,
+              actual: message.actual,
+              message: message.message,
+              line: message.line,
+              column: message.column
+            })
+            
+            // Check if this category is enabled
+            const categoryEnabled = this.options.categories?.[categoryInfo.category] ?? true
+            if (!categoryEnabled) {
+              console.log('🔍 SpellCheck: Category disabled, skipping:', categoryInfo.category)
+              continue
+            }
+            
+            // Skip ignored words
+            if (message.actual && this.ignoredWords.has(message.actual.toLowerCase())) {
+              continue
+            }
+            
+            // Calculate position in the original document
+            const wordStart = pos + 1 + (message.column ? message.column - 1 : 0) // +1 for paragraph node
+            const wordLength = message.actual ? message.actual.length : 1
+            const wordEnd = wordStart + wordLength
+            
+            // Validate positions
+            if (wordStart >= 0 && wordEnd <= doc.content.size && wordStart < wordEnd) {
+              const suggestions = message.expected ? 
+                (Array.isArray(message.expected) ? message.expected : [message.expected]) : 
+                []
               
-              // Validate positions
-              if (wordStart >= 0 && wordEnd <= doc.content.size && wordStart < wordEnd) {
-                const misspelledWord = {
-                  word: message.actual,
-                  suggestions: Array.isArray(message.expected) ? message.expected : [message.expected],
-                  position: { from: wordStart, to: wordEnd }
-                }
-                
-                paragraphWords.push(misspelledWord)
-                allMisspelledWords.push(misspelledWord)
+              const misspelledWord: MisspelledWord = {
+                word: message.actual || '',
+                suggestions: suggestions.slice(0, this.options.maxSuggestions || 5),
+                position: { from: wordStart, to: wordEnd },
+                category: categoryInfo.category,
+                ruleId,
+                message: message.message || '',
+                severity: categoryInfo.severity
               }
+              
+              paragraphWords.push(misspelledWord)
+              allMisspelledWords.push(misspelledWord)
             }
           }
           
@@ -384,17 +536,20 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       toKeep.forEach(([key, value]) => this.paragraphCache.set(key, value))
     }
 
-    console.log('🔍 SpellCheck: Final misspelled words:', allMisspelledWords.length)
+    console.log('🔍 SpellCheck: Final comprehensive analysis:', {
+      totalIssues: allMisspelledWords.length,
+      byCategory: this.categorizeErrors(allMisspelledWords)
+    })
     return allMisspelledWords
   }
 
-  // Create decorations for misspelled words
+  // Create decorations for misspelled words with category-specific styling
   private buildDecorations(doc: any): DecorationSet {
     const enabled = this.options.enabled ?? true
     console.log('🔍 SpellCheck: Building decorations:', {
       enabled,
       misspelledWordsCount: this.misspelledWords.length,
-      misspelledWords: this.misspelledWords.map(w => ({ word: w.word, position: w.position }))
+      misspelledWords: this.misspelledWords.map(w => ({ word: w.word, position: w.position, category: w.category }))
     })
 
     if (!enabled || this.misspelledWords.length === 0) {
@@ -402,11 +557,13 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       return DecorationSet.empty
     }
 
-    const decorations = this.misspelledWords.map(({ position, word }) => {
-      console.log('🔍 SpellCheck: Creating decoration for word:', {
+    const decorations = this.misspelledWords.map(({ position, word, category, severity }) => {
+      console.log('🔍 SpellCheck: Creating decoration for issue:', {
         word,
         from: position.from,
         to: position.to,
+        category,
+        severity,
         docSize: doc.content.size
       })
       
@@ -421,9 +578,23 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         return null
       }
       
+      // Category-specific styling
+      const categoryStyles = {
+        correctness: {
+          error: 'text-decoration: underline; text-decoration-color: #ef4444; text-decoration-style: wavy; text-decoration-thickness: 2px;',
+          warning: 'text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-style: wavy; text-decoration-thickness: 1px;',
+          info: 'text-decoration: underline; text-decoration-color: #3b82f6; text-decoration-style: dotted; text-decoration-thickness: 1px;'
+        },
+        clarity: {
+          error: 'text-decoration: underline; text-decoration-color: #8b5cf6; text-decoration-style: wavy; text-decoration-thickness: 2px;',
+          warning: 'text-decoration: underline; text-decoration-color: #8b5cf6; text-decoration-style: wavy; text-decoration-thickness: 1px;',
+          info: 'text-decoration: underline; text-decoration-color: #8b5cf6; text-decoration-style: dotted; text-decoration-thickness: 1px;'
+        }
+      }
+      
       return Decoration.inline(position.from, position.to, {
-        class: 'spell-error',
-        style: 'text-decoration: underline; text-decoration-color: red; text-decoration-style: wavy; text-decoration-thickness: 2px;'
+        class: `spell-error spell-error-${category} spell-error-${severity}`,
+        style: categoryStyles[category][severity]
       })
     }).filter((decoration): decoration is Decoration => decoration !== null) // Remove null decorations
 
@@ -449,17 +620,24 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
           console.log('🔍 SpellCheck: Plugin state initialized')
           return DecorationSet.empty
         },
-        apply: (tr, decorationSet) => {
+        apply: (tr, decorationSet, oldState) => {
           const enabled = this.options.enabled ?? true
           console.log('🔍 SpellCheck: Plugin apply called:', {
             enabled,
             docChanged: tr.docChanged,
-            hasMeta: !!tr.getMeta(spellCheckPluginKey)
+            hasMeta: !!tr.getMeta(spellCheckPluginKey),
+            selectionChanged: tr.selectionSet && !tr.selection.eq(oldState.selection)
           })
 
           if (!enabled) {
             console.log('🔍 SpellCheck: Disabled, returning empty set')
             return DecorationSet.empty
+          }
+          
+          // Handle selection changes for cursor tracking
+          if (tr.selectionSet && !tr.selection.eq(oldState.selection)) {
+            const pos = tr.selection.from
+            this.handleCursorChange(pos)
           }
           
           // Map decorations through the transaction
@@ -508,6 +686,18 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
             decorationCount: pluginState ? pluginState.find().length : 0
           })
           return pluginState || DecorationSet.empty
+        },
+        handleClick: (view, pos, event) => {
+          // Handle clicks on decorations
+          const decorations = spellCheckPluginKey.getState(view.state)
+          if (decorations) {
+            const clickedDecorations = decorations.find(pos, pos)
+            if (clickedDecorations.length > 0) {
+              this.handleCursorChange(pos)
+              return true
+            }
+          }
+          return false
         }
       }
     })]
@@ -554,7 +744,11 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       this.onUpdateCallback?.({
         isLoading: false,
         error: null,
-        misspelledWords: []
+        misspelledWords: [],
+        categorizedErrors: {
+          correctness: [],
+          clarity: []
+        }
       })
     }
     
@@ -567,21 +761,92 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     }
   }
 
+  toggleCategory(category: ErrorCategory) {
+    const currentCategories = this.options.categories || {}
+    const newCategories = {
+      ...currentCategories,
+      [category]: !currentCategories[category]
+    }
+    
+    console.log('🔍 SpellCheck: Toggling category:', { category, enabled: newCategories[category] })
+    this.setOptions({ categories: newCategories })
+    
+    // Trigger re-analysis
+    const view = this.store.view
+    if (view) {
+      this.debouncedSpellCheck(view.state.doc)
+    }
+  }
+
   // Helper methods
   setUpdateCallback(callback: (data: {
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
+    categorizedErrors: {
+      correctness: MisspelledWord[]
+      clarity: MisspelledWord[]
+    }
   }) => void) {
     console.log('🔍 SpellCheck: Setting update callback')
     this.onUpdateCallback = callback
+  }
+
+  setFocusChangeCallback(callback: (wordId: string | null) => void) {
+    console.log('🔍 SpellCheck: Setting focus change callback')
+    this.onFocusChangeCallback = callback
+  }
+
+  // Focus on a specific word in the editor
+  focusWord(from: number, to: number) {
+    console.log('🔍 SpellCheck: Focusing on word at position:', { from, to })
+    const view = this.store.view
+    if (view) {
+      // Create a selection at the word position using TextSelection
+      const { TextSelection } = require('prosemirror-state')
+      const selection = TextSelection.create(view.state.doc, from, to)
+      const tr = view.state.tr.setSelection(selection)
+      view.dispatch(tr)
+      
+      // Scroll to the selection
+      view.focus()
+      view.dom.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  // Find word ID by position (for reverse lookup from cursor position)
+  findWordIdByPosition(pos: number): string | null {
+    for (let i = 0; i < this.misspelledWords.length; i++) {
+      const word = this.misspelledWords[i]
+      if (pos >= word.position.from && pos <= word.position.to) {
+        return `${word.word}-${word.position.from}-${word.ruleId}-${i}`
+      }
+    }
+    return null
+  }
+
+  // Handle cursor position changes to update focused word
+  handleCursorChange(pos: number) {
+    const wordId = this.findWordIdByPosition(pos)
+    if (wordId !== this.focusedWordId) {
+      this.focusedWordId = wordId
+      this.onFocusChangeCallback?.(wordId)
+    }
   }
 
   getMisspelledWords(): MisspelledWord[] {
     return this.misspelledWords
   }
 
+  getCategorizedErrors() {
+    return this.categorizeErrors(this.misspelledWords)
+  }
+
   isSpellCheckEnabled(): boolean {
     return this.options.enabled ?? true
+  }
+
+  isCategoryEnabled(category: ErrorCategory): boolean {
+    return this.options.categories?.[category] ?? true
   }
 } 

@@ -71,13 +71,7 @@ import { CodeExtension } from '@remirror/extension-code'
 import { CodeMirrorExtension } from '@remirror/extension-codemirror6'
 import { HistoryExtension } from '@remirror/extension-history'
 import { PlaceholderExtension } from '@remirror/extension-placeholder'
-import { SpellCheckExtension } from './spell-check-extension'
-
-export interface MisspelledWord {
-  word: string
-  suggestions: string[]
-  position: { from: number, to: number }
-}
+import { SpellCheckExtension, MisspelledWord, ErrorCategory } from './spell-check-extension'
 
 interface RemirrorEditorProps {
   content: string
@@ -86,7 +80,12 @@ interface RemirrorEditorProps {
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
+    categorizedErrors: {
+      correctness: MisspelledWord[]
+      clarity: MisspelledWord[]
+    }
   }) => void
+  onFocusChange?: (wordId: string | null) => void
   editorRef?: React.MutableRefObject<any>
 }
 
@@ -435,7 +434,7 @@ const FloatingToolbar = ({ manager }: { manager: any }) => {
 }
 
 // Main editor component
-function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: RemirrorEditorProps) {
+function RemirrorEditor({ content, onChange, onSpellCheckUpdate, onFocusChange, editorRef }: RemirrorEditorProps) {
   const spellCheckExtensionRef = useRef<SpellCheckExtension | null>(null)
 
   const extensions = useCallback(() => {
@@ -445,6 +444,11 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
     // Set up the spell check callback
     if (onSpellCheckUpdate) {
       spellCheckExtension.setUpdateCallback(onSpellCheckUpdate)
+    }
+    
+    // Set up the focus change callback
+    if (onFocusChange) {
+      spellCheckExtension.setFocusChangeCallback(onFocusChange)
     }
 
     return [
@@ -524,7 +528,7 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
       new PlaceholderExtension({ placeholder: 'Start writing your document...' }),
       spellCheckExtension
     ]
-  }, [onSpellCheckUpdate])
+  }, [onSpellCheckUpdate, onFocusChange])
 
   const { manager, state } = useRemirror({ 
     extensions, 
@@ -561,15 +565,32 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, editorRef }: Re
     replaceWord: (from: number, to: number, replacement: string) => {
       spellCheckExtensionRef.current?.replaceWord(from, to, replacement)
     },
+    focusWord: (from: number, to: number) => {
+      spellCheckExtensionRef.current?.focusWord(from, to)
+    },
     toggleSpellCheck: () => {
       spellCheckExtensionRef.current?.toggleSpellCheck()
+    },
+    toggleCategory: (category: ErrorCategory) => {
+      spellCheckExtensionRef.current?.toggleCategory(category)
     },
     getMisspelledWords: () => {
       const words = spellCheckExtensionRef.current?.getMisspelledWords() || []
       return words
     },
+    getCategorizedErrors: () => {
+      const categorized = spellCheckExtensionRef.current?.getCategorizedErrors() || {
+        correctness: [],
+        clarity: []
+      }
+      return categorized
+    },
     isSpellCheckEnabled: () => {
       const enabled = spellCheckExtensionRef.current?.isSpellCheckEnabled() ?? true
+      return enabled
+    },
+    isCategoryEnabled: (category: ErrorCategory) => {
+      const enabled = spellCheckExtensionRef.current?.isCategoryEnabled(category) ?? true
       return enabled
     },
     getManager: () => manager // Expose manager for toolbar

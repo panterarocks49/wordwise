@@ -15,7 +15,7 @@ import {
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
 import { useDocumentStore } from "@/lib/stores/document-store"
-import { MisspelledWord } from "./remirror-editor"
+import { MisspelledWord, ErrorCategory } from "./spell-check-extension"
 import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
 import RemirrorEditor, { FloatingToolbar } from './remirror-editor'
@@ -48,11 +48,28 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
+    categorizedErrors: {
+      correctness: MisspelledWord[]
+      clarity: MisspelledWord[]
+    }
   }>({
     isLoading: false,
     error: null,
-    misspelledWords: []
+    misspelledWords: [],
+    categorizedErrors: {
+      correctness: [],
+      clarity: []
+    }
   })
+
+  // Category states
+  const [categoryStates, setCategoryStates] = useState({
+    correctness: true,
+    clarity: true
+  })
+
+  // Focus state for sidebar/editor coordination
+  const [focusedWordId, setFocusedWordId] = useState<string | null>(null)
 
   const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -239,25 +256,51 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     }
   }, [document.id]) // Only depend on document.id, not changing values
 
-  // Handle spell check updates from the extension - memoized
+  // Handle spell check updates - memoized
   const handleSpellCheckUpdate = useCallback((data: {
     isLoading: boolean
     error: string | null
     misspelledWords: MisspelledWord[]
-  }) => {
-    // Only update state if component is still mounted
-    if (!mountedRef.current) {
-      console.log('📄 DocumentEditor: Component not mounted, skipping spell check update')
-      return
+    categorizedErrors: {
+      correctness: MisspelledWord[]
+      clarity: MisspelledWord[]
     }
-    
-    console.log('📄 DocumentEditor: Spell check update received:', {
+  }) => {
+    console.log('Spell check update received:', {
       isLoading: data.isLoading,
       error: data.error,
-      misspelledWordsCount: data.misspelledWords.length,
-      misspelledWords: data.misspelledWords.map(w => ({ word: w.word, position: w.position }))
+      misspelledCount: data.misspelledWords.length,
+      categorizedCounts: {
+        correctness: data.categorizedErrors.correctness.length,
+        clarity: data.categorizedErrors.clarity.length
+      }
     })
-    setSpellCheckData(data)
+    
+    // Defer state update to avoid updating unmounted component
+    if (mountedRef.current) {
+      setSpellCheckData(data)
+    } else {
+      // If component isn't mounted, defer the update
+      setTimeout(() => {
+        if (mountedRef.current) {
+          setSpellCheckData(data)
+        }
+      }, 0)
+    }
+  }, [])
+
+  // Handle category toggle
+  const handleToggleCategory = useCallback((category: ErrorCategory) => {
+    console.log('Toggling category:', category)
+    setCategoryStates(prev => ({
+      ...prev,
+      [category]: !prev[category]
+    }))
+    
+    // Also toggle in the editor extension
+    if (editorRef.current) {
+      editorRef.current.toggleCategory(category)
+    }
   }, [])
 
   // Handle word replacement from sidebar - memoized
@@ -276,6 +319,21 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     }
   }, [])
 
+  // Handle focusing on a word from sidebar - memoized
+  const handleFocusWord = useCallback((wordData: MisspelledWord) => {
+    console.log('Focusing on word:', wordData)
+    if (editorRef.current) {
+      // Scroll to and highlight the word in the editor
+      editorRef.current.focusWord(wordData.position.from, wordData.position.to)
+    }
+  }, [])
+
+  // Handle focus changes from sidebar - memoized
+  const handleFocusChange = useCallback((wordId: string | null) => {
+    console.log('Focus changed to:', wordId)
+    setFocusedWordId(wordId)
+  }, [])
+
   // Memoize preview toggle
   const togglePreview = useCallback(() => {
     setIsPreview(!isPreview)
@@ -291,8 +349,9 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
     content,
     onChange: updateCurrentContent,
     onSpellCheckUpdate: handleSpellCheckUpdate,
+    onFocusChange: handleFocusChange,
     editorRef
-  }), [content, updateCurrentContent, handleSpellCheckUpdate])
+  }), [content, updateCurrentContent, handleSpellCheckUpdate, handleFocusChange])
 
   // Get the manager from the editor when it's ready
   useEffect(() => {
@@ -397,10 +456,16 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
         isLoading={spellCheckData.isLoading}
         error={spellCheckData.error}
         misspelledWords={spellCheckData.misspelledWords}
+        categorizedErrors={spellCheckData.categorizedErrors}
         isOpen={spellCheckSidebarOpen}
         onToggle={toggleSpellCheckSidebar}
         onWordReplace={handleWordReplace}
         onIgnoreWord={handleIgnoreWord}
+        onToggleCategory={handleToggleCategory}
+        categoryStates={categoryStates}
+        focusedWordId={focusedWordId}
+        onFocusWord={handleFocusWord}
+        onFocusChange={handleFocusChange}
       />
       
       {/* Floating Sidebar Toggle Button */}
@@ -408,8 +473,8 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
         variant="ghost"
         size="sm"
         onClick={toggleSpellCheckSidebar}
-        className={`fixed top-4 z-50 h-10 w-8 rounded-l-lg rounded-r-none bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 border-r-0 transition-all duration-300 ${
-          spellCheckSidebarOpen ? 'right-80' : 'right-0'
+        className={`fixed top-3 z-50 h-12 w-8 rounded-l-lg rounded-r-none bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 border-r-0 transition-all duration-300 ${
+          spellCheckSidebarOpen ? 'right-[26rem]' : 'right-0'
         }`}
       >
         {spellCheckSidebarOpen ? (
