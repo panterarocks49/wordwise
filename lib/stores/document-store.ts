@@ -195,6 +195,11 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   },
 
   updateCurrentContent: (content: string) => {
+    console.log('DocumentStore - Updating content:', {
+      contentLength: content.length,
+      contentPreview: content.substring(0, 100) + '...',
+      timestamp: new Date().toISOString()
+    })
     set({ currentContent: content })
   },
 

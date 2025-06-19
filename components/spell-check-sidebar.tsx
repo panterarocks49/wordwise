@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -13,7 +13,7 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react"
-import { MisspelledWord } from "./spell-check-extension"
+import { MisspelledWord } from "./remirror-editor"
 
 interface SpellCheckSidebarProps {
   isLoading: boolean

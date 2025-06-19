@@ -15,13 +15,10 @@ import {
 import Link from "next/link"
 import { updateDocument } from "@/lib/document-actions"
 import { useDocumentStore } from "@/lib/stores/document-store"
-import { MisspelledWord as TipTapMisspelledWord, ignoreWord, replaceWord } from "./spell-check-extension"
+import { MisspelledWord } from "./remirror-editor"
 import { SpellCheckSidebar } from "./spell-check-sidebar"
 import ReactMarkdown from "react-markdown"
-import dynamic from 'next/dynamic'
-
-// Dynamically import the tiptap editor component
-const Editor = dynamic(() => import('./tiptap-editor'), { ssr: false })
+import RemirrorEditor from './remirror-editor'
 
 interface DocumentEditorProps {
   document: {
@@ -30,6 +27,7 @@ interface DocumentEditorProps {
     content: string
     created_at: string
     updated_at: string
+    user_id?: string
   }
 }
 
@@ -37,19 +35,21 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [isPreview, setIsPreview] = useState(false)
   const [spellCheckSidebarOpen, setSpellCheckSidebarOpen] = useState(true)
-  const [lastSavedTitle, setLastSavedTitle] = useState(document.title)
-  const [lastSavedContent, setLastSavedContent] = useState(document.content)
+  const [saveCount, setSaveCount] = useState(0)
   const [spellCheckData, setSpellCheckData] = useState<{
     isLoading: boolean
     error: string | null
-    misspelledWords: TipTapMisspelledWord[]
+    misspelledWords: MisspelledWord[]
   }>({
     isLoading: true,
     error: null,
     misspelledWords: []
   })
   const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const editorRef = useRef<any>(null)
+  const lastSavedTitleRef = useRef(document.title)
+  const lastSavedContentRef = useRef(document.content)
   
   const { 
     updateDocumentInStore,
@@ -65,83 +65,169 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
 
   // Initialize the current document in the store only once
   useEffect(() => {
-    const docWithUserId = { ...document, user_id: '' } // Add missing user_id field
-    setCurrentDocument(docWithUserId)
+    // Don't add empty user_id, just use the document as-is
+    setCurrentDocument({ ...document, user_id: document.user_id || '' })
+    // Initialize refs with document values
+    lastSavedTitleRef.current = document.title
+    lastSavedContentRef.current = document.content
   }, [document.id, setCurrentDocument]) // Only re-run if document ID changes
 
-  // Use store values with fallbacks
-  const title = currentTitle || document.title
-  const content = currentContent || document.content
+  // Use store values with fallbacks, but ensure we initialize properly
+  const title = currentDocument ? currentTitle : document.title
+  const content = currentDocument ? currentContent : document.content
 
-  // Memoize the hasChanges function to compare against last saved values
+  // Memoize the hasChanges function to compare against last saved values using refs
   const hasChanges = useMemo(() => {
-    return title !== lastSavedTitle || content !== lastSavedContent
-  }, [title, content, lastSavedTitle, lastSavedContent])
+    const currentHasChanges = title !== lastSavedTitleRef.current || content !== lastSavedContentRef.current
+    console.log('hasChanges calculation:', {
+      title,
+      lastSavedTitle: lastSavedTitleRef.current,
+      content: content?.substring(0, 50) + '...',
+      lastSavedContent: lastSavedContentRef.current?.substring(0, 50) + '...',
+      titleChanged: title !== lastSavedTitleRef.current,
+      contentChanged: content !== lastSavedContentRef.current,
+      hasChanges: currentHasChanges,
+      saveCount // Include saveCount to trigger recalculation
+    })
+    return currentHasChanges
+  }, [title, content, saveCount]) // saveCount forces recalculation after saves
 
-  // Simple save function - memoized to prevent recreation
-  const saveDocument = useCallback(async () => {
-    if (isSaving || !hasChanges) {
-      console.log('Skipping save - no changes or already saving')
+  // Add debugging to see what's happening
+  useEffect(() => {
+    console.log('Document Editor - Current state:', {
+      documentId: document.id,
+      hasCurrentDocument: !!currentDocument,
+      currentTitle,
+      currentContent: currentContent?.substring(0, 100) + '...',
+      title,
+      content: content?.substring(0, 100) + '...',
+      hasChanges,
+      isSaving
+    })
+  }, [document.id, currentDocument, currentTitle, currentContent, title, content, hasChanges, isSaving])
+
+  // Auto-save functionality - memoized
+  const autoSave = useCallback(async () => {
+    // Check hasChanges inside the function rather than in dependencies
+    const currentHasChanges = title !== lastSavedTitleRef.current || content !== lastSavedContentRef.current
+    
+    console.log('Auto-save triggered:', {
+      currentHasChanges,
+      title,
+      lastSavedTitle: lastSavedTitleRef.current,
+      contentLength: content.length,
+      lastSavedContentLength: lastSavedContentRef.current.length
+    })
+    
+    if (!currentHasChanges) {
+      console.log('Auto-save: No changes detected, skipping')
       return
     }
-    
-    console.log('Attempting to save document:', { id: document.id, title, content: content.substring(0, 50) + '...' })
-    
-    setIsSaving(true)
-    
+
     try {
+      console.log('Auto-save: Starting save...')
+      setIsSaving(true)
       await updateDocument(document.id, title, content)
-      console.log('Document saved successfully')
-      
-      // Update the document store with the new values
+      // Update refs instead of state
+      lastSavedTitleRef.current = title
+      lastSavedContentRef.current = content
       updateDocumentInStore(document.id, title, content)
+      console.log('Auto-save: Completed successfully')
       
-      // Update our last saved tracking
-      setLastSavedTitle(title)
-      setLastSavedContent(content)
+      // Increment saveCount to force hasChanges recalculation
+      setSaveCount(prev => prev + 1)
+      
     } catch (error) {
-      console.error("Failed to save document:", error)
+      console.error('Auto-save failed:', error)
     } finally {
       setIsSaving(false)
     }
-  }, [document.id, title, content, isSaving, updateDocumentInStore, hasChanges, lastSavedTitle, lastSavedContent])
+  }, [document.id, title, content, updateDocumentInStore])
 
-  // Continuous auto-save loop - runs every 2 seconds and only saves if there are changes
+  // Manual save function - memoized
+  const handleManualSave = useCallback(async () => {
+    console.log('Manual save triggered')
+    await autoSave()
+  }, [autoSave])
+
+  // Title blur handler - memoized
+  const handleTitleBlur = useCallback(() => {
+    console.log('Title blur - checking for changes')
+    const currentHasChanges = title !== lastSavedTitleRef.current || content !== lastSavedContentRef.current
+    if (currentHasChanges) {
+      console.log('Title blur - changes detected, auto-saving')
+      autoSave()
+    }
+  }, [autoSave, title, content])
+
+  // Set up auto-save with debounced approach
   useEffect(() => {
-    console.log('Setting up auto-save interval')
-    autoSaveIntervalRef.current = setInterval(() => {
-      if (hasChanges && !isSaving) {
-        console.log('Auto-saving document due to changes detected in interval')
-        saveDocument()
+    console.log('Setting up debounced auto-save')
+    
+    // Clear any existing timeout
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current)
+    }
+    
+    // Check if there are changes
+    const { currentTitle, currentContent } = useDocumentStore.getState()
+    const currentHasChanges = (currentTitle || document.title) !== lastSavedTitleRef.current || 
+                             (currentContent || document.content) !== lastSavedContentRef.current
+    
+    if (currentHasChanges && !isSaving) {
+      console.log('Changes detected, setting up auto-save in 2 seconds')
+      // Set up auto-save to trigger in 2 seconds
+      autoSaveTimeoutRef.current = setTimeout(() => {
+        console.log('Auto-save timeout triggered')
+        autoSave()
+      }, 2000) // 2 seconds after change
+    }
+    
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        console.log('Clearing auto-save timeout')
+        clearTimeout(autoSaveTimeoutRef.current)
+        autoSaveTimeoutRef.current = null
       }
-    }, 2000) // Check every 2 seconds
+    }
+  }, [title, content, isSaving, autoSave]) // Trigger when content changes
+
+  // Keep a backup interval for safety (every 30 seconds)
+  useEffect(() => {
+    console.log('Setting up backup auto-save interval')
+    
+    const interval = setInterval(() => {
+      const { currentTitle, currentContent } = useDocumentStore.getState()
+      const currentHasChanges = (currentTitle || document.title) !== lastSavedTitleRef.current || 
+                               (currentContent || document.content) !== lastSavedContentRef.current
+      
+      console.log('Backup auto-save interval check:', {
+        currentHasChanges,
+        isSaving
+      })
+      
+      if (currentHasChanges && !isSaving) {
+        console.log('Backup auto-save: Changes detected, triggering save')
+        autoSave()
+      }
+    }, 30000) // Backup every 30 seconds
+
+    autoSaveIntervalRef.current = interval
 
     return () => {
-      console.log('Cleaning up auto-save interval')
+      console.log('Cleaning up backup auto-save interval')
       if (autoSaveIntervalRef.current) {
         clearInterval(autoSaveIntervalRef.current)
+        autoSaveIntervalRef.current = null
       }
     }
-  }, [hasChanges, isSaving, saveDocument])
-
-  // Memoize event handlers to prevent recreation on every render
-  const handleTitleBlur = useCallback(() => {
-    if (hasChanges && !isSaving) {
-      console.log('Saving due to title blur')
-      saveDocument()
-    }
-  }, [hasChanges, isSaving, saveDocument])
-
-  const handleManualSave = useCallback(() => {
-    console.log('Manual save triggered')
-    saveDocument()
-  }, [saveDocument])
+  }, [document.id]) // Only depend on document.id, not changing values
 
   // Handle spell check updates - memoized
   const handleSpellCheckUpdate = useCallback((data: {
     isLoading: boolean
     error: string | null
-    misspelledWords: TipTapMisspelledWord[]
+    misspelledWords: MisspelledWord[]
   }) => {
     setSpellCheckData(data)
   }, [])
@@ -150,16 +236,21 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const handleWordReplace = useCallback((originalWord: string, replacement: string) => {
     console.log('Replacing word:', originalWord, 'with:', replacement)
     if (editorRef.current) {
-      replaceWord(editorRef.current, originalWord, replacement)
+      // For now, we'll do a simple text replacement
+      const currentContent = editorRef.current.getHTML()
+      const newContent = currentContent.replace(new RegExp(`\\b${originalWord}\\b`, 'gi'), replacement)
+      updateCurrentContent(newContent)
     }
-  }, [])
+  }, [updateCurrentContent])
 
   // Handle ignoring words from sidebar - memoized
   const handleIgnoreWord = useCallback((word: string) => {
     console.log('Ignoring word:', word)
-    if (editorRef.current) {
-      ignoreWord(editorRef.current, word)
-    }
+    // For now, we'll just remove it from the misspelled words list
+    setSpellCheckData(prev => ({
+      ...prev,
+      misspelledWords: prev.misspelledWords.filter(w => w.word !== word)
+    }))
   }, [])
 
   // Memoize preview toggle
@@ -171,6 +262,14 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
   const toggleSpellCheckSidebar = useCallback(() => {
     setSpellCheckSidebarOpen(!spellCheckSidebarOpen)
   }, [spellCheckSidebarOpen])
+
+  // Memoize editor props to prevent unnecessary re-renders
+  const editorProps = useMemo(() => ({
+    content,
+    onChange: updateCurrentContent,
+    onSpellCheckUpdate: handleSpellCheckUpdate,
+    editorRef
+  }), [content, updateCurrentContent, handleSpellCheckUpdate])
 
   return (
     <div className="h-screen bg-[#161616] text-white flex">
@@ -227,11 +326,9 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
             <div className="bg-white rounded-lg overflow-hidden">
               {!isPreview ? (
                 <div className="prose prose-lg max-w-none">
-                  <Editor 
-                    content={content} 
-                    onChange={updateCurrentContent}
-                    onSpellCheckUpdate={handleSpellCheckUpdate}
-                    editorRef={editorRef}
+                  <RemirrorEditor 
+                    key={`editor-${document.id}`}
+                    {...editorProps}
                   />
                 </div>
               ) : (

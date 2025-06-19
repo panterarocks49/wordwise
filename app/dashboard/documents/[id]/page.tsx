@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect, notFound } from "next/navigation"
-import DocumentEditor from "@/components/document-editor"
+import DocumentEditorClient from "./document-editor-client"
 
 interface DocumentPageProps {
   params: Promise<{
@@ -35,5 +35,5 @@ export default async function DocumentPage({ params }: DocumentPageProps) {
     notFound()
   }
 
-  return <DocumentEditor document={document} />
+  return <DocumentEditorClient document={document} />
 }

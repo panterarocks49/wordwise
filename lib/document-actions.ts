@@ -38,6 +38,14 @@ export async function createDocument() {
 }
 
 export async function updateDocument(documentId: string, title: string, content: string) {
+  console.log('Server Action - updateDocument called:', {
+    documentId,
+    title,
+    contentLength: content.length,
+    contentPreview: content.substring(0, 100) + '...',
+    timestamp: new Date().toISOString()
+  })
+  
   const supabase = await createClient()
 
   // Get the current user
@@ -47,8 +55,11 @@ export async function updateDocument(documentId: string, title: string, content:
   } = await supabase.auth.getUser()
 
   if (userError || !user) {
+    console.error('Server Action - User not authenticated:', userError)
     throw new Error("User not authenticated")
   }
+
+  console.log('Server Action - User authenticated:', user.id)
 
   // Update the document
   const { error } = await supabase
@@ -62,9 +73,11 @@ export async function updateDocument(documentId: string, title: string, content:
     .eq("user_id", user.id) // Ensure user owns the document
 
   if (error) {
-    console.error("Error updating document:", error)
+    console.error("Server Action - Error updating document:", error)
     throw new Error("Failed to update document")
   }
+
+  console.log('Server Action - Document updated successfully')
 }
 
 export async function getUserDocuments() {
