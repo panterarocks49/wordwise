@@ -5,7 +5,9 @@ import { PlainExtension } from 'remirror'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { debounce } from 'lodash'
-import nspell from 'nspell'
+import { retext } from 'retext'
+import retextEnglish from 'retext-english'
+import retextSpell from 'retext-spell'
 
 export interface MisspelledWord {
   word: string
@@ -25,8 +27,10 @@ const spellCheckPluginKey = new PluginKey('spellCheck')
 
 export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   private spellChecker: any = null
+  private dictionary: any = null
   private ignoredWords = new Set<string>()
   private misspelledWords: MisspelledWord[] = []
+  private paragraphCache = new Map<string, { hash: string, misspelledWords: MisspelledWord[], lastPos: number }>()
   private onUpdateCallback?: (data: {
     isLoading: boolean
     error: string | null
@@ -47,9 +51,9 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     }
   }
 
-  // Load dictionary
+  // Load dictionary and initialize retext processor
   private async loadDictionary(): Promise<void> {
-    console.log('🔍 SpellCheck: Starting dictionary load...')
+    console.log('🔍 SpellCheck: Starting retext processor initialization...')
     try {
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
@@ -60,19 +64,12 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         })
       }, 0)
 
-      // Load English dictionary from CDN
-      console.log('🔍 SpellCheck: Fetching dictionary files from CDN...')
+      // Load dictionary files from CDN (browser-compatible)
+      console.log('🔍 SpellCheck: Loading dictionary files from CDN...')
       const [affResponse, dicResponse] = await Promise.all([
-        fetch('https://cdn.jsdelivr.net/npm/dictionary-en@3.2.0/index.aff'),
-        fetch('https://cdn.jsdelivr.net/npm/dictionary-en@3.2.0/index.dic')
+        fetch('https://cdn.jsdelivr.net/npm/dictionary-en@4.0.0/index.aff'),
+        fetch('https://cdn.jsdelivr.net/npm/dictionary-en@4.0.0/index.dic')
       ])
-
-      console.log('🔍 SpellCheck: Dictionary fetch responses:', {
-        affOk: affResponse.ok,
-        affStatus: affResponse.status,
-        dicOk: dicResponse.ok,
-        dicStatus: dicResponse.status
-      })
 
       if (!affResponse.ok || !dicResponse.ok) {
         throw new Error(`Failed to load dictionary files: aff=${affResponse.status}, dic=${dicResponse.status}`)
@@ -81,24 +78,21 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       const aff = await affResponse.text()
       const dic = await dicResponse.text()
 
-      console.log('🔍 SpellCheck: Dictionary files loaded:', {
-        affLength: aff.length,
-        dicLength: dic.length
-      })
+      console.log('🔍 SpellCheck: Dictionary files loaded successfully')
 
-      this.spellChecker = nspell({ aff, dic })
-      console.log('🔍 SpellCheck: nspell instance created successfully')
+      // Create dictionary object compatible with retext-spell
+      this.dictionary = { aff, dic }
+
+      // Create retext processor with English parser and spell checker
+      console.log('🔍 SpellCheck: Creating retext processor...')
+      this.spellChecker = retext()
+        .use(retextEnglish)
+        .use(retextSpell, this.dictionary)
+
+      console.log('🔍 SpellCheck: Retext processor created successfully')
       
       // Test the spell checker
-      const testWord = 'hello'
-      const testIncorrect = 'helo'
-      console.log('🔍 SpellCheck: Testing spell checker:', {
-        testWord: testWord,
-        isCorrect: this.spellChecker.correct(testWord),
-        testIncorrect: testIncorrect,
-        isIncorrect: this.spellChecker.correct(testIncorrect),
-        suggestions: this.spellChecker.suggest(testIncorrect)
-      })
+      await this.testSpellChecker()
 
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
@@ -125,7 +119,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       }, 100) // Small delay to ensure the view is ready
 
     } catch (error) {
-      console.error('🔍 SpellCheck: Failed to load dictionary:', error)
+      console.error('🔍 SpellCheck: Failed to initialize spell checker:', error)
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
         this.onUpdateCallback?.({
@@ -137,13 +131,36 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     }
   }
 
-  // Debounced spell check function
-  private debouncedSpellCheck = debounce(async (doc: any) => {
+  // Test the spell checker with some sample words
+  private async testSpellChecker() {
+    try {
+      const testText = 'This is a test with a mispelled word.'
+      const file = await this.spellChecker.process(testText)
+      
+      console.log('🔍 SpellCheck: Testing spell checker:', {
+        testText,
+        messagesCount: file.messages.length,
+        messages: file.messages.map((msg: any) => ({
+          message: msg.message,
+          actual: msg.actual,
+          expected: msg.expected,
+          line: msg.line,
+          column: msg.column
+        }))
+      })
+    } catch (error) {
+      console.error('🔍 SpellCheck: Test failed:', error)
+    }
+  }
+
+  // Debounced spell check function - now with change tracking
+  private debouncedSpellCheck = debounce(async (doc: any, changedRanges?: Array<{ from: number, to: number }>) => {
     const enabled = this.options.enabled ?? true
     console.log('🔍 SpellCheck: Debounced spell check triggered:', {
       hasSpellChecker: !!this.spellChecker,
       enabled,
-      docSize: doc.content.size
+      docSize: doc.content.size,
+      hasChangedRanges: !!changedRanges
     })
 
     if (!this.spellChecker || !enabled) {
@@ -161,7 +178,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     }, 0)
 
     try {
-      const misspelledWords = await this.performSpellCheck(doc)
+      const misspelledWords = await this.performSpellCheck(doc, changedRanges)
       console.log('🔍 SpellCheck: Spell check completed:', {
         misspelledCount: misspelledWords.length,
         misspelledWords: misspelledWords.map(w => ({ word: w.word, position: w.position }))
@@ -201,82 +218,174 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     }
   }, this.options.debounceMs)
 
-  // Perform spell check on text
-  private async performSpellCheck(doc: any): Promise<MisspelledWord[]> {
-    console.log('🔍 SpellCheck: Performing spell check on document structure')
+  // Generate a simple hash for text content
+  private hashText(text: string): string {
+    let hash = 0
+    for (let i = 0; i < text.length; i++) {
+      const char = text.charCodeAt(i)
+      hash = ((hash << 5) - hash) + char
+      hash = hash & hash // Convert to 32-bit integer
+    }
+    return hash.toString()
+  }
 
-    const misspelledWords: MisspelledWord[] = []
+  // Update cached positions when document changes
+  private updateCachedPositions(mapping: any) {
+    const updatedCache = new Map<string, { hash: string, misspelledWords: MisspelledWord[], lastPos: number }>()
     
-    // Traverse the document structure instead of using raw text
+    for (const [key, cached] of this.paragraphCache.entries()) {
+      const updatedWords = cached.misspelledWords.map(word => {
+        const newFrom = mapping.map(word.position.from)
+        const newTo = mapping.map(word.position.to)
+        return {
+          ...word,
+          position: { from: newFrom, to: newTo }
+        }
+      }).filter(word => 
+        // Filter out words that were deleted (mapped to -1)
+        word.position.from !== -1 && word.position.to !== -1 && 
+        word.position.from < word.position.to
+      )
+      
+      if (updatedWords.length > 0 || cached.misspelledWords.length === 0) {
+        updatedCache.set(key, {
+          ...cached,
+          misspelledWords: updatedWords
+        })
+      }
+    }
+    
+    this.paragraphCache = updatedCache
+    
+    // Also update our main misspelled words array
+    this.misspelledWords = this.misspelledWords.map(word => {
+      const newFrom = mapping.map(word.position.from)
+      const newTo = mapping.map(word.position.to)
+      return {
+        ...word,
+        position: { from: newFrom, to: newTo }
+      }
+    }).filter(word => 
+      word.position.from !== -1 && word.position.to !== -1 && 
+      word.position.from < word.position.to
+    )
+  }
+
+  // Perform spell check on text using retext - now optimized for changed content
+  private async performSpellCheck(doc: any, changedRanges?: Array<{ from: number, to: number }>): Promise<MisspelledWord[]> {
+    console.log('🔍 SpellCheck: Performing optimized spell check')
+
+    const allMisspelledWords: MisspelledWord[] = []
+    const paragraphsToCheck: Array<{ node: any, pos: number, text: string }> = []
+    const unchangedParagraphs: Array<{ pos: number, cached: MisspelledWord[] }> = []
+    
+    // Collect paragraphs that need checking
     doc.descendants((node: any, pos: number) => {
       // Skip code blocks and other non-text content
       if (node.type.name === 'codeMirror' || node.type.name === 'codeBlock') {
-        console.log('🔍 SpellCheck: Skipping code block at position:', pos)
-        return false // Don't traverse into code blocks
+        return false
       }
       
-      // Only process text nodes
-      if (node.isText && node.text) {
-        const nodeText = node.text
-        console.log('🔍 SpellCheck: Processing text node:', {
-          position: pos,
-          text: nodeText.substring(0, 50) + (nodeText.length > 50 ? '...' : ''),
-          textLength: nodeText.length
-        })
+      // Process paragraph-level nodes
+      if (node.type.name === 'paragraph' || node.type.name === 'heading' || node.type.name === 'blockquote') {
+        const text = node.textContent
+        if (!text.trim()) return // Skip empty paragraphs
         
-        // Extract words from this text node
-        const words = nodeText.match(/\b[a-zA-Z]+\b/g) || []
+        const nodeEnd = pos + node.nodeSize
+        const cacheKey = `${node.type.name}`
         
-        for (const word of words) {
-          // Find the word's position within this text node
-          let wordIndex = 0
-          let searchStart = 0
-          
-          // Handle multiple occurrences of the same word
-          while ((wordIndex = nodeText.indexOf(word, searchStart)) !== -1) {
-            searchStart = wordIndex + word.length
-            
-            // Calculate absolute position in the document
-            const absoluteFrom = pos + wordIndex // pos is already at the start of the node
-            const absoluteTo = absoluteFrom + word.length
-            
-            console.log('🔍 SpellCheck: Checking word:', {
-              word,
-              wordIndex,
-              absoluteFrom,
-              absoluteTo,
-              isCorrect: this.spellChecker.correct(word),
-              isIgnored: this.ignoredWords.has(word.toLowerCase())
-            })
-
-            if (
-              word.length > 1 &&
-              !this.spellChecker.correct(word) &&
-              !this.ignoredWords.has(word.toLowerCase())
-            ) {
-              const suggestions = this.spellChecker
-                .suggest(word)
-                .slice(0, this.options.maxSuggestions || 5)
-
-              console.log('🔍 SpellCheck: Word is misspelled:', {
-                word,
-                suggestions,
-                position: { from: absoluteFrom, to: absoluteTo }
-              })
-
-              misspelledWords.push({
-                word,
-                suggestions,
-                position: { from: absoluteFrom, to: absoluteTo }
-              })
+        // If we have changed ranges, only check paragraphs that intersect with changes
+        if (changedRanges) {
+          const intersectsChange = changedRanges.some(range => 
+            !(range.to <= pos || range.from >= nodeEnd)
+          )
+          if (!intersectsChange) {
+            // Check if we have cached results for this paragraph
+            const textHash = this.hashText(text)
+            const cached = this.paragraphCache.get(`${pos}-${cacheKey}`)
+            if (cached && cached.hash === textHash) {
+              // Use cached results - positions should already be correct from mapping
+              unchangedParagraphs.push({ pos, cached: cached.misspelledWords })
+              console.log('🔍 SpellCheck: Using cached results for unchanged paragraph at', pos)
+              return
             }
           }
         }
+        
+        paragraphsToCheck.push({ node, pos, text })
       }
     })
 
-    console.log('🔍 SpellCheck: Final misspelled words:', misspelledWords)
-    return misspelledWords
+    console.log('🔍 SpellCheck: Checking', paragraphsToCheck.length, 'paragraphs, reusing', unchangedParagraphs.length, 'cached')
+
+    // Add unchanged paragraphs' cached results
+    unchangedParagraphs.forEach(({ cached }) => {
+      allMisspelledWords.push(...cached)
+    })
+
+    // Process paragraphs in batches to avoid blocking the UI
+    const batchSize = 5
+    for (let i = 0; i < paragraphsToCheck.length; i += batchSize) {
+      const batch = paragraphsToCheck.slice(i, i + batchSize)
+      
+      // Process batch
+      for (const { node, pos, text } of batch) {
+        try {
+          // Use the shared processor (don't create a new one each time)
+          const file = await this.spellChecker.process(text)
+          const paragraphWords: MisspelledWord[] = []
+          
+          // Process retext messages (spell check errors)
+          for (const message of file.messages) {
+            if (message.source === 'retext-spell' && message.actual && message.expected) {
+              // Calculate position in the original document
+              const wordStart = pos + 1 + (message.column ? message.column - 1 : 0) // +1 for paragraph node
+              const wordEnd = wordStart + message.actual.length
+              
+              // Validate positions
+              if (wordStart >= 0 && wordEnd <= doc.content.size && wordStart < wordEnd) {
+                const misspelledWord = {
+                  word: message.actual,
+                  suggestions: Array.isArray(message.expected) ? message.expected : [message.expected],
+                  position: { from: wordStart, to: wordEnd }
+                }
+                
+                paragraphWords.push(misspelledWord)
+                allMisspelledWords.push(misspelledWord)
+              }
+            }
+          }
+          
+          // Cache the results for this paragraph
+          const textHash = this.hashText(text)
+          const cacheKey = `${node.type.name}`
+          this.paragraphCache.set(`${pos}-${cacheKey}`, {
+            hash: textHash,
+            misspelledWords: paragraphWords,
+            lastPos: pos
+          })
+          
+        } catch (error) {
+          console.error('🔍 SpellCheck: Error processing paragraph:', error)
+        }
+      }
+      
+      // Yield control to prevent blocking
+      if (i + batchSize < paragraphsToCheck.length) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+    }
+
+    // Clean up old cache entries (keep only recent ones)
+    if (this.paragraphCache.size > 100) {
+      const entries = Array.from(this.paragraphCache.entries())
+      const toKeep = entries.slice(-50) // Keep last 50 entries
+      this.paragraphCache.clear()
+      toKeep.forEach(([key, value]) => this.paragraphCache.set(key, value))
+    }
+
+    console.log('🔍 SpellCheck: Final misspelled words:', allMisspelledWords.length)
+    return allMisspelledWords
   }
 
   // Create decorations for misspelled words
@@ -357,14 +466,28 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
           let mapped = decorationSet.map(tr.mapping, tr.doc)
           console.log('🔍 SpellCheck: Mapped decorations through transaction')
           
-          // If document changed, schedule spell check
+          // If document changed, update cached positions and schedule spell check
           if (tr.docChanged) {
-            const text = tr.doc.textContent
-            console.log('🔍 SpellCheck: Document changed, scheduling spell check:', {
-              textLength: text.length,
-              textPreview: text.substring(0, 100) + '...'
+            // Update all cached positions to account for document changes
+            this.updateCachedPositions(tr.mapping)
+            
+            const changedRanges: Array<{ from: number, to: number }> = []
+            
+            // Extract changed ranges from the transaction
+            tr.steps.forEach(step => {
+              // Check if this is a replace step by examining the step's structure
+              const stepData = step as any
+              if (stepData.from !== undefined && stepData.to !== undefined) {
+                changedRanges.push({ from: stepData.from, to: stepData.to })
+              }
             })
-            this.debouncedSpellCheck(tr.doc)
+            
+            console.log('🔍 SpellCheck: Document changed, scheduling targeted spell check:', {
+              changedRanges,
+              textLength: tr.doc.textContent.length
+            })
+            
+            this.debouncedSpellCheck(tr.doc, changedRanges.length > 0 ? changedRanges : undefined)
           }
           
           // Check if we need to update decorations
