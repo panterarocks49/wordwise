@@ -546,7 +546,8 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     console.log('🔍 SpellCheck: Building decorations:', {
       enabled,
       misspelledWordsCount: this.misspelledWords.length,
-      misspelledWords: this.misspelledWords.map(w => ({ word: w.word, position: w.position, category: w.category }))
+      misspelledWords: this.misspelledWords.map(w => ({ word: w.word, position: w.position, category: w.category })),
+      focusedWordId: this.focusedWordId
     })
 
     if (!enabled || this.misspelledWords.length === 0) {
@@ -554,7 +555,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       return DecorationSet.empty
     }
 
-    const decorations = this.misspelledWords.map(({ position, word, category, severity }) => {
+    const decorations = this.misspelledWords.map(({ position, word, category, severity }, index) => {
       console.log('🔍 SpellCheck: Creating decoration for issue:', {
         word,
         from: position.from,
@@ -575,23 +576,21 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         return null
       }
       
-      // Category-specific styling
+      // Generate the same word ID that sidebar uses
+      const wordId = `${word}-${position.from}-${this.misspelledWords[index].ruleId}-${index}`
+      const isFocused = this.focusedWordId === wordId
+      
+      // Enhanced category-specific styling with hover effects
       const categoryStyles = {
-        correctness: {
-          error: 'text-decoration: underline; text-decoration-color: #ef4444; text-decoration-style: wavy; text-decoration-thickness: 2px;',
-          warning: 'text-decoration: underline; text-decoration-color: #f59e0b; text-decoration-style: wavy; text-decoration-thickness: 1px;',
-          info: 'text-decoration: underline; text-decoration-color: #3b82f6; text-decoration-style: dotted; text-decoration-thickness: 1px;'
-        },
-        clarity: {
-          error: 'text-decoration: underline; text-decoration-color: #8b5cf6; text-decoration-style: wavy; text-decoration-thickness: 2px;',
-          warning: 'text-decoration: underline; text-decoration-color: #8b5cf6; text-decoration-style: wavy; text-decoration-thickness: 1px;',
-          info: 'text-decoration: underline; text-decoration-color: #8b5cf6; text-decoration-style: dotted; text-decoration-thickness: 1px;'
-        }
+        correctness: 'text-decoration: underline; text-decoration-color: #ef4444; text-decoration-style: solid; text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer;',
+        clarity: 'text-decoration: underline; text-decoration-color: #3b82f6; text-decoration-style: solid; text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer;'
       }
       
       return Decoration.inline(position.from, position.to, {
-        class: `spell-error spell-error-${category} spell-error-${severity}`,
-        style: categoryStyles[category][severity]
+        class: `spell-error spell-error-${category}${isFocused ? ' focused' : ''}`,
+        style: categoryStyles[category],
+        'data-word-id': wordId,
+        title: `${category === 'correctness' ? 'Correctness' : 'Clarity'} issue: ${word}`
       })
     }).filter((decoration): decoration is Decoration => decoration !== null) // Remove null decorations
 
@@ -695,6 +694,21 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
             }
           }
           return false
+        },
+        handleDOMEvents: {
+          mouseover: (view, event) => {
+            const target = event.target as HTMLElement
+            // Check if we're hovering over a spell error decoration
+            if (target.classList.contains('spell-error')) {
+              // Just show the tooltip on hover, don't update sidebar focus
+              // The browser will handle showing the title attribute as a tooltip
+            }
+            return false
+          },
+          mouseout: (view, event) => {
+            // Remove the mouseout handler since we're not tracking hover focus anymore
+            return false
+          }
         }
       }
     })]
@@ -805,9 +819,43 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       const tr = view.state.tr.setSelection(selection)
       view.dispatch(tr)
       
-      // Scroll to the selection
+      // Update focused word state
+      this.handleCursorChange(from)
+      
+      // Scroll to the selection with better positioning
       view.focus()
-      view.dom.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      
+      // Find the DOM element for the word and scroll it into view
+      setTimeout(() => {
+        const editorDOM = view.dom
+        const rect = view.coordsAtPos(from)
+        if (rect) {
+          // Calculate the container to scroll (look for scrollable parent)
+          let scrollContainer = editorDOM.parentElement
+          while (scrollContainer && scrollContainer !== document.body) {
+            const style = window.getComputedStyle(scrollContainer)
+            if (style.overflowY === 'auto' || style.overflowY === 'scroll' || 
+                scrollContainer.classList.contains('overflow-y-auto')) {
+              break
+            }
+            scrollContainer = scrollContainer.parentElement
+          }
+          
+          if (scrollContainer) {
+            const containerRect = scrollContainer.getBoundingClientRect()
+            const wordTop = rect.top
+            const containerTop = containerRect.top
+            const containerHeight = containerRect.height
+            
+            // Scroll so the word is centered in the visible area
+            const scrollOffset = wordTop - containerTop - (containerHeight / 2)
+            scrollContainer.scrollBy({
+              top: scrollOffset,
+              behavior: 'smooth'
+            })
+          }
+        }
+      }, 50) // Small delay to ensure selection is set first
     }
   }
 
@@ -824,10 +872,24 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
   // Handle cursor position changes to update focused word
   handleCursorChange(pos: number) {
-    const wordId = this.findWordIdByPosition(pos)
+    let wordId: string | null = null
+    
+    if (pos >= 0) {
+      wordId = this.findWordIdByPosition(pos)
+    }
+    // If pos is -1, wordId remains null (no focus)
+    
     if (wordId !== this.focusedWordId) {
       this.focusedWordId = wordId
       this.onFocusChangeCallback?.(wordId)
+      
+      // Trigger decoration rebuild to update focused styling
+      const view = this.store.view
+      if (view) {
+        const tr = view.state.tr
+        tr.setMeta(spellCheckPluginKey, { updateDecorations: true })
+        view.dispatch(tr)
+      }
     }
   }
 

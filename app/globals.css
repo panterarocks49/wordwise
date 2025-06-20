@@ -97,3 +97,37 @@
     -webkit-line-clamp: 3;
   }
 }
+
+/* Spell check decoration styles */
+@layer components {
+  .spell-error {
+    @apply transition-all duration-200;
+    border-radius: 2px;
+    padding: 1px 2px;
+    margin: -1px -2px;
+  }
+  
+  .spell-error:hover {
+    @apply bg-gray-800/30;
+    text-decoration-thickness: 3px !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  .spell-error-correctness:hover {
+    @apply bg-red-500/10;
+    text-decoration-color: #f87171 !important;
+  }
+  
+  .spell-error-clarity:hover {
+    @apply bg-blue-500/10;
+    text-decoration-color: #60a5fa !important;
+  }
+  
+  /* Focused state for spell errors */
+  .spell-error.focused {
+    @apply bg-blue-500/20;
+    text-decoration-thickness: 3px !important;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+  }
+}

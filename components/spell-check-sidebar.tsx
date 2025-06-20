@@ -55,9 +55,9 @@ const categoryConfig = {
   clarity: {
     label: "Clarity", 
     icon: AlertTriangle,
-    color: "text-purple-400",
-    bgColor: "bg-purple-500/10",
-    borderColor: "border-purple-500/20",
+    color: "text-blue-400",
+    bgColor: "bg-blue-500/10",
+    borderColor: "border-blue-500/20",
     description: "Conciseness, readability & style"
   }
 }
@@ -90,9 +90,49 @@ export function SpellCheckSidebar({
 
   useEffect(() => {
     if (focusedWordId) {
-      setExpandedItemId(focusedWordId)
+      let foundWord: MisspelledWord | null = null
+      let foundIndex = -1
+      
+      for (let i = 0; i < misspelledWords.length; i++) {
+        const wordId = getWordId(misspelledWords[i], i)
+        if (wordId === focusedWordId) {
+          foundWord = misspelledWords[i]
+          foundIndex = i
+          break
+        }
+      }
+
+      if (foundWord) {
+        const needsTabSwitch = activeTab !== foundWord.category
+        
+        if (needsTabSwitch) {
+          setActiveTab(foundWord.category)
+        }
+        
+        setExpandedItemId(focusedWordId)
+        
+        const scrollDelay = needsTabSwitch ? 200 : 100
+        setTimeout(() => {
+          const element = document.querySelector(`[data-word-id="${focusedWordId}"]`)
+          if (element) {
+            element.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'center',
+              inline: 'nearest'
+            })
+          }
+        }, scrollDelay)
+      }
     }
-  }, [focusedWordId])
+  }, [focusedWordId, misspelledWords])
+
+  const handleTabChange = (category: ErrorCategory) => {
+    setActiveTab(category)
+    if (focusedWordId) {
+      setExpandedItemId(null)
+      onFocusChange?.(null)
+    }
+  }
 
   const handleItemClick = (wordData: MisspelledWord, index: number) => {
     const wordId = getWordId(wordData, index)
@@ -175,6 +215,7 @@ export function SpellCheckSidebar({
     return (
       <div
         key={wordId}
+        data-word-id={wordId}
         className={`${config.bgColor} rounded-md border ${config.borderColor} transition-all duration-200 cursor-pointer ${
           isFocused ? 'ring-2 ring-blue-400/50 bg-opacity-80' : ''
         }`}
@@ -186,7 +227,6 @@ export function SpellCheckSidebar({
               <span className={`${config.color} font-medium text-sm truncate`}>
                 {wordData.word}
               </span>
-              {getSeverityIcon(wordData.severity)}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <Badge variant="outline" className="text-xs px-2 py-0 h-5 truncate max-w-24">
@@ -204,7 +244,6 @@ export function SpellCheckSidebar({
                 <span className={`${config.color} font-medium text-sm truncate`}>
                   {wordData.word}
                 </span>
-                {getSeverityIcon(wordData.severity)}
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <Badge variant="outline" className="text-xs px-2 py-0 h-5 truncate max-w-24">
@@ -289,7 +328,7 @@ export function SpellCheckSidebar({
   }
 
   return (
-    <div className={`bg-[#161616] border-l border-gray-800 transition-all duration-300 ease-in-out ${
+    <div className={`spell-check-sidebar bg-[#161616] border-l border-gray-800 transition-all duration-300 ease-in-out ${
       isOpen ? 'w-[32rem]' : 'w-0'
     } flex flex-col overflow-hidden h-screen`}>
       {isOpen && (
@@ -318,7 +357,7 @@ export function SpellCheckSidebar({
                     return (
                       <button
                         key={key}
-                        onClick={() => setActiveTab(category)}
+                        onClick={() => handleTabChange(category)}
                         disabled={!isEnabled}
                         className={`flex-1 px-4 py-3 text-sm font-medium relative transition-all duration-200 ${
                           isActive 
@@ -338,20 +377,8 @@ export function SpellCheckSidebar({
                         
                         {isActive && (
                           <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${
-                            category === 'correctness' ? 'bg-red-400' : 'bg-purple-400'
+                            category === 'correctness' ? 'bg-red-400' : 'bg-blue-400'
                           }`} />
-                        )}
-                        
-                        {onToggleCategory && (
-                          <div
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onToggleCategory(category)
-                            }}
-                            className={`absolute top-1 right-1 w-2 h-2 rounded-full cursor-pointer transition-colors ${
-                              isEnabled ? 'bg-green-400' : 'bg-gray-500'
-                            }`}
-                          />
                         )}
                       </button>
                     )
@@ -401,7 +428,15 @@ export function SpellCheckSidebar({
                     return (
                       <div className="flex-1 overflow-y-auto">
                         <div className="flex flex-col gap-3 p-3">
-                          {words.map((wordData, index) => renderWordCard(wordData, index))}
+                          {words.map((wordData, categoryIndex) => {
+                            // Find the original index in the full misspelledWords array
+                            const originalIndex = misspelledWords.findIndex(w => 
+                              w.word === wordData.word && 
+                              w.position.from === wordData.position.from && 
+                              w.ruleId === wordData.ruleId
+                            )
+                            return renderWordCard(wordData, originalIndex)
+                          })}
                         </div>
                       </div>
                     )
