@@ -32,6 +32,7 @@ export interface MisspelledWord {
   ruleId: string
   message: string
   severity: 'error' | 'warning' | 'info'
+  source?: 'retext' | 'ai' // Add source tracking
 }
 
 export interface SpellCheckOptions {
@@ -72,7 +73,9 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   private dictionary: any = null
   private ignoredWords = new Set<string>()
   private misspelledWords: MisspelledWord[] = []
+  private aiSuggestions: MisspelledWord[] = [] // Track AI suggestions separately
   private paragraphCache = new Map<string, { hash: string, misspelledWords: MisspelledWord[], lastPos: number }>()
+  private aiCache = new Map<string, { hash: string, suggestions: MisspelledWord[], timestamp: number }>() // Cache for AI suggestions
   private onUpdateCallback?: (data: {
     isLoading: boolean
     error: string | null
@@ -84,6 +87,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   }) => void
   private onFocusChangeCallback?: (wordId: string | null) => void
   private focusedWordId: string | null = null
+  private lastCursorPosition: number = 0 // Track cursor position for AI checking
 
   get name() {
     return 'spellCheck' as const
@@ -105,7 +109,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
   // Load dictionary and initialize retext processor
   private async loadDictionary(): Promise<void> {
-    console.log('🔍 SpellCheck: Starting comprehensive retext processor initialization...')
     try {
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
@@ -121,7 +124,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       }, 0)
 
       // Load dictionary files from CDN (browser-compatible)
-      console.log('🔍 SpellCheck: Loading dictionary files from CDN...')
       const [affResponse, dicResponse] = await Promise.all([
         fetch('https://cdn.jsdelivr.net/npm/dictionary-en@4.0.0/index.aff'),
         fetch('https://cdn.jsdelivr.net/npm/dictionary-en@4.0.0/index.dic')
@@ -134,13 +136,10 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       const aff = await affResponse.text()
       const dic = await dicResponse.text()
 
-      console.log('🔍 SpellCheck: Dictionary files loaded successfully')
-
       // Create dictionary object compatible with retext-spell
       this.dictionary = { aff, dic }
 
       // Create comprehensive retext processor with all plugins
-      console.log('🔍 SpellCheck: Creating comprehensive retext processor...')
       this.spellChecker = retext()
         .use(retextEnglish)
         .use(retextSyntaxUrls) // Handle URLs first
@@ -162,11 +161,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         .use(retextReadability)
         .use(retextPassive)
 
-      console.log('🔍 SpellCheck: Comprehensive retext processor created successfully')
-      
-      // Test the spell checker
-      await this.testSpellChecker()
-
       // Defer the callback to avoid React render phase issues
       setTimeout(() => {
         this.onUpdateCallback?.({
@@ -181,17 +175,10 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       }, 0)
 
       // Trigger initial spell check on existing content
-      console.log('🔍 SpellCheck: Dictionary loaded, triggering initial spell check...')
       setTimeout(() => {
         const view = this.store.view
         if (view && view.state.doc.content.size > 0) {
-          console.log('🔍 SpellCheck: Running initial spell check on existing content:', {
-            docSize: view.state.doc.content.size,
-            textContent: view.state.doc.textContent.substring(0, 100) + '...'
-          })
           this.debouncedSpellCheck(view.state.doc)
-        } else {
-          console.log('🔍 SpellCheck: No content to spell check initially')
         }
       }, 100) // Small delay to ensure the view is ready
 
@@ -212,30 +199,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     }
   }
 
-  // Test the spell checker with some sample words
-  private async testSpellChecker() {
-    try {
-      const testText = 'This is a test with a mispelled word and some weasel words. We should utilize this instead of use this. The ATM machine is over there.'
-      const file = await this.spellChecker.process(testText)
-      
-      console.log('🔍 SpellCheck: Testing comprehensive spell checker:', {
-        testText,
-        messagesCount: file.messages.length,
-        messages: file.messages.map((msg: any) => ({
-          message: msg.message,
-          source: msg.source,
-          ruleId: msg.ruleId,
-          actual: msg.actual,
-          expected: msg.expected,
-          line: msg.line,
-          column: msg.column
-        }))
-      })
-    } catch (error) {
-      console.error('🔍 SpellCheck: Test failed:', error)
-    }
-  }
-
   // Categorize errors into the two main categories
   private categorizeErrors(misspelledWords: MisspelledWord[]) {
     const categorizedErrors = {
@@ -247,29 +210,154 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       categorizedErrors[word.category].push(word)
     })
 
-    console.log('🔍 SpellCheck: Categorization results:', {
-      totalWords: misspelledWords.length,
-      correctness: categorizedErrors.correctness.length,
-      clarity: categorizedErrors.clarity.length,
-      correctnessWords: categorizedErrors.correctness.map(w => w.word),
-      clarityWords: categorizedErrors.clarity.map(w => w.word)
-    })
-
     return categorizedErrors
+  }
+
+  // New AI-powered grammar checking function (debounced by 300ms)
+  private debouncedAiGrammarCheck = debounce(async (doc: any, cursorPos: number) => {
+    const enabled = this.options.enabled ?? true
+
+    if (!enabled) {
+      return
+    }
+
+    try {
+      const currentParagraph = this.getCurrentParagraph(doc, cursorPos)
+      if (!currentParagraph) {
+        return
+      }
+
+      console.log('🤖 AI Grammar: [STUB] Would send to GPT-4.1 nano:', currentParagraph.text)
+
+      // Check cache first
+      const textHash = this.hashText(currentParagraph.text)
+      const cached = this.aiCache.get(currentParagraph.position.from.toString())
+      const cacheExpiry = 5 * 60 * 1000 // 5 minutes
+      
+      if (cached && cached.hash === textHash && Date.now() - cached.timestamp < cacheExpiry) {
+        await this.processAiSuggestions(cached.suggestions)
+        return
+      }
+
+      // Simulate async GPT call delay
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // TODO: Replace this stub with actual GPT-4.1 nano API call
+      const aiSuggestions = await this.callGptBackend(currentParagraph.text, currentParagraph.position)
+      
+      // Cache the results
+      this.aiCache.set(currentParagraph.position.from.toString(), {
+        hash: textHash,
+        suggestions: aiSuggestions,
+        timestamp: Date.now()
+      })
+
+      await this.processAiSuggestions(aiSuggestions)
+
+    } catch (error) {
+      console.error('🤖 AI Grammar: Error in AI grammar check:', error)
+    }
+  }, 300) // 300ms debounce as requested
+
+  // Get the current paragraph based on cursor position
+  private getCurrentParagraph(doc: any, cursorPos: number): { text: string, position: { from: number, to: number } } | null {
+    let currentParagraph: { text: string, position: { from: number, to: number } } | null = null
+    
+    doc.descendants((node: any, pos: number) => {
+      // Skip if we already found the paragraph
+      if (currentParagraph) return false
+      
+      // Skip code blocks and other non-text content
+      if (node.type.name === 'codeMirror' || node.type.name === 'codeBlock') {
+        return false
+      }
+      
+      // Check if cursor is within this paragraph-level node
+      if (node.type.name === 'paragraph' || node.type.name === 'heading' || node.type.name === 'blockquote') {
+        const nodeStart = pos
+        const nodeEnd = pos + node.nodeSize
+        
+        if (cursorPos >= nodeStart && cursorPos <= nodeEnd) {
+          const text = node.textContent
+          if (text.trim()) { // Only process non-empty paragraphs
+            currentParagraph = {
+              text,
+              position: { from: nodeStart, to: nodeEnd }
+            }
+          }
+          return false // Stop traversing
+        }
+      }
+    })
+    
+    return currentParagraph
+  }
+
+  // Stub for GPT backend call - will be implemented later
+  private async callGptBackend(text: string, position: { from: number, to: number }): Promise<MisspelledWord[]> {
+    // TODO: Implement actual GPT-4.1 nano API call here
+    // This is just a placeholder that returns empty suggestions
+    
+    // Simulate some processing time
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
+    // Return empty suggestions for now
+    return []
+  }
+
+  // Process AI suggestions and merge with existing decorations
+  private async processAiSuggestions(aiSuggestions: MisspelledWord[]) {
+    // Update our AI suggestions array
+    this.aiSuggestions = aiSuggestions
+
+    // Merge AI suggestions with existing retext-based misspelled words
+    const allSuggestions = this.mergeAllSuggestions()
+    
+    // Update the main misspelled words array
+    this.misspelledWords = allSuggestions
+    const categorizedErrors = this.categorizeErrors(allSuggestions)
+    
+    // Update callback
+    setTimeout(() => {
+      this.onUpdateCallback?.({
+        isLoading: false,
+        error: null,
+        misspelledWords: allSuggestions,
+        categorizedErrors
+      })
+    }, 0)
+
+    // Update decorations
+    const view = this.store.view
+    if (view) {
+      const tr = view.state.tr
+      tr.setMeta(spellCheckPluginKey, { updateDecorations: true })
+      view.dispatch(tr)
+    }
+  }
+
+  // Merge retext and AI suggestions, avoiding duplicates
+  private mergeAllSuggestions(): MisspelledWord[] {
+    const retextSuggestions = this.misspelledWords.filter(word => word.source !== 'ai')
+    const combined = [...retextSuggestions, ...this.aiSuggestions]
+    
+    // Remove duplicates based on position and word
+    const uniqueSuggestions = combined.filter((word, index, arr) => {
+      return arr.findIndex(w => 
+        w.position.from === word.position.from && 
+        w.position.to === word.position.to && 
+        w.word === word.word
+      ) === index
+    })
+    
+    return uniqueSuggestions
   }
 
   // Debounced spell check function - now with change tracking
   private debouncedSpellCheck = debounce(async (doc: any, changedRanges?: Array<{ from: number, to: number }>) => {
     const enabled = this.options.enabled ?? true
-    console.log('🔍 SpellCheck: Debounced spell check triggered:', {
-      hasSpellChecker: !!this.spellChecker,
-      enabled,
-      docSize: doc.content.size,
-      hasChangedRanges: !!changedRanges
-    })
 
     if (!this.spellChecker || !enabled) {
-      console.log('🔍 SpellCheck: Skipping - no spell checker or disabled')
       return
     }
 
@@ -288,10 +376,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
     try {
       const misspelledWords = await this.performSpellCheck(doc, changedRanges)
-      console.log('🔍 SpellCheck: Spell check completed:', {
-        misspelledCount: misspelledWords.length,
-        misspelledWords: misspelledWords.map(w => ({ word: w.word, position: w.position, category: w.category }))
-      })
       
       this.misspelledWords = misspelledWords
       const categorizedErrors = this.categorizeErrors(misspelledWords)
@@ -309,12 +393,9 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       // Update decorations by dispatching an empty transaction
       const view = this.store.view
       if (view) {
-        console.log('🔍 SpellCheck: Updating decorations via transaction')
         const tr = view.state.tr
         tr.setMeta(spellCheckPluginKey, { updateDecorations: true })
         view.dispatch(tr)
-      } else {
-        console.log('🔍 SpellCheck: No view available for decoration update')
       }
     } catch (error) {
       console.error('🔍 SpellCheck: Spell check error:', error)
@@ -372,8 +453,8 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     
     this.paragraphCache = updatedCache
     
-    // Also update our main misspelled words array
-    this.misspelledWords = this.misspelledWords.map(word => {
+    // Also update AI suggestions positions
+    this.aiSuggestions = this.aiSuggestions.map(word => {
       const newFrom = mapping.map(word.position.from)
       const newTo = mapping.map(word.position.to)
       return {
@@ -384,12 +465,40 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       word.position.from !== -1 && word.position.to !== -1 && 
       word.position.from < word.position.to
     )
+    
+    // Also update our main misspelled words array (filtering out retext-only words first)
+    const retextWords = this.misspelledWords.filter(word => word.source !== 'ai').map(word => {
+      const newFrom = mapping.map(word.position.from)
+      const newTo = mapping.map(word.position.to)
+      return {
+        ...word,
+        position: { from: newFrom, to: newTo }
+      }
+    }).filter(word => 
+      word.position.from !== -1 && word.position.to !== -1 && 
+      word.position.from < word.position.to
+    )
+    
+    // Merge updated retext words with updated AI suggestions
+    this.misspelledWords = this.mergeRetextAndAiWords(retextWords, this.aiSuggestions)
+  }
+
+  // Helper method to merge retext and AI words
+  private mergeRetextAndAiWords(retextWords: MisspelledWord[], aiWords: MisspelledWord[]): MisspelledWord[] {
+    const combined = [...retextWords, ...aiWords]
+    
+    // Remove duplicates based on position and word
+    return combined.filter((word, index, arr) => {
+      return arr.findIndex(w => 
+        w.position.from === word.position.from && 
+        w.position.to === word.position.to && 
+        w.word === word.word
+      ) === index
+    })
   }
 
   // Perform spell check on text using retext - now optimized for changed content
   private async performSpellCheck(doc: any, changedRanges?: Array<{ from: number, to: number }>): Promise<MisspelledWord[]> {
-    console.log('🔍 SpellCheck: Performing comprehensive optimized spell check')
-
     const allMisspelledWords: MisspelledWord[] = []
     const paragraphsToCheck: Array<{ node: any, pos: number, text: string }> = []
     const unchangedParagraphs: Array<{ pos: number, cached: MisspelledWord[] }> = []
@@ -421,7 +530,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
             if (cached && cached.hash === textHash) {
               // Use cached results - positions should already be correct from mapping
               unchangedParagraphs.push({ pos, cached: cached.misspelledWords })
-              console.log('🔍 SpellCheck: Using cached results for unchanged paragraph at', pos)
               return
             }
           }
@@ -430,8 +538,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         paragraphsToCheck.push({ node, pos, text })
       }
     })
-
-    console.log('🔍 SpellCheck: Checking', paragraphsToCheck.length, 'paragraphs, reusing', unchangedParagraphs.length, 'cached')
 
     // Add unchanged paragraphs' cached results
     unchangedParagraphs.forEach(({ cached }) => {
@@ -456,21 +562,9 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
             const ruleId = message.ruleId || source
             const categoryInfo = categoryMappings[source] || { category: 'correctness', severity: 'warning' }
             
-            // Debug logging to see what's happening
-            console.log('🔍 SpellCheck: Processing message:', {
-              source,
-              ruleId,
-              categoryInfo,
-              actual: message.actual,
-              message: message.message,
-              line: message.line,
-              column: message.column
-            })
-            
             // Check if this category is enabled
             const categoryEnabled = this.options.categories?.[categoryInfo.category] ?? true
             if (!categoryEnabled) {
-              console.log('🔍 SpellCheck: Category disabled, skipping:', categoryInfo.category)
               continue
             }
             
@@ -497,7 +591,8 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
                 category: categoryInfo.category,
                 ruleId,
                 message: message.message || '',
-                severity: categoryInfo.severity
+                severity: categoryInfo.severity,
+                source: 'retext' // Mark as retext source
               }
               
               paragraphWords.push(misspelledWord)
@@ -533,46 +628,20 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       toKeep.forEach(([key, value]) => this.paragraphCache.set(key, value))
     }
 
-    console.log('🔍 SpellCheck: Final comprehensive analysis:', {
-      totalIssues: allMisspelledWords.length,
-      byCategory: this.categorizeErrors(allMisspelledWords)
-    })
     return allMisspelledWords
   }
 
   // Create decorations for misspelled words with category-specific styling
   private buildDecorations(doc: any): DecorationSet {
     const enabled = this.options.enabled ?? true
-    console.log('🔍 SpellCheck: Building decorations:', {
-      enabled,
-      misspelledWordsCount: this.misspelledWords.length,
-      misspelledWords: this.misspelledWords.map(w => ({ word: w.word, position: w.position, category: w.category })),
-      focusedWordId: this.focusedWordId
-    })
 
     if (!enabled || this.misspelledWords.length === 0) {
-      console.log('🔍 SpellCheck: Returning empty decoration set')
       return DecorationSet.empty
     }
 
     const decorations = this.misspelledWords.map(({ position, word, category, severity }, index) => {
-      console.log('🔍 SpellCheck: Creating decoration for issue:', {
-        word,
-        from: position.from,
-        to: position.to,
-        category,
-        severity,
-        docSize: doc.content.size
-      })
-      
       // Validate positions
       if (position.from < 0 || position.to > doc.content.size || position.from >= position.to) {
-        console.warn('🔍 SpellCheck: Invalid position for word:', {
-          word,
-          from: position.from,
-          to: position.to,
-          docSize: doc.content.size
-        })
         return null
       }
       
@@ -593,40 +662,23 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         title: `${category === 'correctness' ? 'Correctness' : 'Clarity'} issue: ${word}`
       })
     }).filter((decoration): decoration is Decoration => decoration !== null) // Remove null decorations
-
-    console.log('🔍 SpellCheck: Created decorations:', {
-      count: decorations.length,
-      decorations: decorations.map(d => ({ from: d.from, to: d.to }))
-    })
     
     const decorationSet = DecorationSet.create(doc, decorations)
-    console.log('🔍 SpellCheck: DecorationSet created:', {
-      decorationSetSize: decorationSet.find().length
-    })
     
     return decorationSet
   }
 
   createExternalPlugins() {
-    console.log('🔍 SpellCheck: Creating external plugins')
     return [new Plugin({
       key: spellCheckPluginKey,
       state: {
         init: () => {
-          console.log('🔍 SpellCheck: Plugin state initialized')
           return DecorationSet.empty
         },
         apply: (tr, decorationSet, oldState) => {
           const enabled = this.options.enabled ?? true
-          console.log('🔍 SpellCheck: Plugin apply called:', {
-            enabled,
-            docChanged: tr.docChanged,
-            hasMeta: !!tr.getMeta(spellCheckPluginKey),
-            selectionChanged: tr.selectionSet && !tr.selection.eq(oldState.selection)
-          })
 
           if (!enabled) {
-            console.log('🔍 SpellCheck: Disabled, returning empty set')
             return DecorationSet.empty
           }
           
@@ -634,11 +686,14 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
           if (tr.selectionSet && !tr.selection.eq(oldState.selection)) {
             const pos = tr.selection.from
             this.handleCursorChange(pos)
+            this.lastCursorPosition = pos
+            
+            // Remove AI grammar check trigger from cursor changes
+            // AI grammar check will only be triggered by document changes below
           }
           
           // Map decorations through the transaction
           let mapped = decorationSet.map(tr.mapping, tr.doc)
-          console.log('🔍 SpellCheck: Mapped decorations through transaction')
           
           // If document changed, update cached positions and schedule spell check
           if (tr.docChanged) {
@@ -656,18 +711,17 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
               }
             })
             
-            console.log('🔍 SpellCheck: Document changed, scheduling targeted spell check:', {
-              changedRanges,
-              textLength: tr.doc.textContent.length
-            })
-            
             this.debouncedSpellCheck(tr.doc, changedRanges.length > 0 ? changedRanges : undefined)
+            
+            // Trigger AI grammar check only when document content changes
+            const cursorPos = tr.selection.from
+            this.lastCursorPosition = cursorPos
+            this.debouncedAiGrammarCheck(tr.doc, cursorPos)
           }
           
           // Check if we need to update decorations
           const meta = tr.getMeta(spellCheckPluginKey)
           if (meta?.updateDecorations) {
-            console.log('🔍 SpellCheck: Meta update decorations requested')
             mapped = this.buildDecorations(tr.doc)
           }
           
@@ -677,10 +731,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       props: {
         decorations: (state) => {
           const pluginState = spellCheckPluginKey.getState(state)
-          console.log('🔍 SpellCheck: Getting decorations from plugin state:', {
-            hasPluginState: !!pluginState,
-            decorationCount: pluginState ? pluginState.find().length : 0
-          })
           return pluginState || DecorationSet.empty
         },
         handleClick: (view, pos, event) => {
@@ -716,13 +766,11 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
   // Initialize the extension
   onCreate() {
-    console.log('🔍 SpellCheck: Extension onCreate called')
     this.loadDictionary()
   }
 
   // Public methods for the sidebar
   ignoreWord(word: string) {
-    console.log('🔍 SpellCheck: Ignoring word:', word)
     this.ignoredWords.add(word.toLowerCase())
     // Remove from current misspelled words
     this.misspelledWords = this.misspelledWords.filter(mw => mw.word.toLowerCase() !== word.toLowerCase())
@@ -737,7 +785,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   }
 
   replaceWord(from: number, to: number, replacement: string) {
-    console.log('🔍 SpellCheck: Replacing word:', { from, to, replacement })
     const view = this.store.view
     if (view) {
       const tr = view.state.tr.replaceWith(from, to, this.store.schema.text(replacement))
@@ -747,7 +794,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
   toggleSpellCheck() {
     const enabled = !this.options.enabled
-    console.log('🔍 SpellCheck: Toggling spell check:', { enabled })
     this.setOptions({ enabled })
     
     if (!enabled) {
@@ -779,7 +825,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       [category]: !currentCategories[category]
     }
     
-    console.log('🔍 SpellCheck: Toggling category:', { category, enabled: newCategories[category] })
     this.setOptions({ categories: newCategories })
     
     // Trigger re-analysis
@@ -799,18 +844,15 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
       clarity: MisspelledWord[]
     }
   }) => void) {
-    console.log('🔍 SpellCheck: Setting update callback')
     this.onUpdateCallback = callback
   }
 
   setFocusChangeCallback(callback: (wordId: string | null) => void) {
-    console.log('🔍 SpellCheck: Setting focus change callback')
     this.onFocusChangeCallback = callback
   }
 
   // Focus on a specific word in the editor
   focusWord(from: number, to: number) {
-    console.log('🔍 SpellCheck: Focusing on word at position:', { from, to })
     const view = this.store.view
     if (view) {
       // Create a selection at the word position using TextSelection

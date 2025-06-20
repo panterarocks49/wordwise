@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getUserDocuments, createDocument, updateDocument, deleteDocument } from '@/lib/document-actions'
+import { getUserDocumentsClient } from '@/lib/document-client-actions'
 
 export interface Document {
   id: string
@@ -14,7 +15,6 @@ interface DocumentStore {
   documents: Document[]
   loading: boolean
   error: string | null
-  currentUserId: string | null
   
   // Current document state
   currentDocument: Document | null
@@ -30,8 +30,6 @@ interface DocumentStore {
   setDocuments: (documents: Document[]) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
-  clearStore: () => void
-  setCurrentUserId: (userId: string | null) => void
   
   // Current document actions
   setCurrentDocument: (document: Document) => void
@@ -45,7 +43,6 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   documents: [],
   loading: false,
   error: null,
-  currentUserId: null,
 
   currentDocument: null,
   currentTitle: '',
@@ -54,140 +51,102 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
 
   fetchDocuments: async () => {
     const { loading } = get()
-    if (loading) return // Prevent concurrent fetches
+    if (loading) return
     
     try {
       set({ loading: true, error: null })
-      const documents = await getUserDocuments()
-      const { currentUserId } = get() // Check if user changed during fetch
-      if (currentUserId) { // Only update if we still have a user
-        set({ documents, loading: false })
-      }
+      const documents = await getUserDocumentsClient()
+      set({ documents, loading: false })
     } catch (error) {
-      const { currentUserId } = get()
-      if (currentUserId) { // Only update if we still have a user
-        set({ 
-          error: error instanceof Error ? error.message : 'Failed to fetch documents',
-          loading: false 
-        })
+      let errorMessage = 'Failed to fetch documents'
+      if (error instanceof Error) {
+        errorMessage = error.message
+      } else if (typeof error === 'string') {
+        errorMessage = error
       }
+      set({ error: errorMessage, loading: false })
     }
   },
 
   addDocument: async () => {
-    const { loading } = get()
-    if (loading) return // Prevent concurrent operations
+    const { loading, documents } = get()
+    if (loading) return
     
     try {
       set({ loading: true, error: null })
-      await createDocument()
-      // createDocument redirects, so we don't need to update state here
+      console.log("Creating document");
+      const newDocument = await createDocument()
+      
+      // Add the new document to the store immediately
+      set({ 
+        documents: [newDocument, ...documents],
+        loading: false 
+      })
+      
+      // Redirect to the new document on the client side
+      window.location.href = `/dashboard/documents/${newDocument.id}`
     } catch (error) {
-      const { currentUserId } = get()
-      if (currentUserId) {
-        set({ 
-          error: error instanceof Error ? error.message : 'Failed to create document',
-          loading: false 
-        })
-      }
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to create document',
+        loading: false 
+      })
     }
   },
 
   removeDocument: async (documentId: string) => {
     const { loading } = get()
-    if (loading) return // Prevent concurrent operations
+    if (loading) return
     
     try {
       set({ loading: true, error: null })
       const result = await deleteDocument(documentId)
       
       if (result.success) {
-        // Update the documents list by removing the deleted document
-        const { documents, currentUserId } = get()
-        if (currentUserId) { // Only update if we still have a user
-          set({ 
-            documents: documents.filter(doc => doc.id !== documentId),
-            loading: false 
-          })
-        }
-      }
-    } catch (error) {
-      const { currentUserId } = get()
-      if (currentUserId) {
+        const { documents } = get()
         set({ 
-          error: error instanceof Error ? error.message : 'Failed to delete document',
+          documents: documents.filter(doc => doc.id !== documentId),
           loading: false 
         })
       }
-      // Re-throw the error so the component can catch it and show an alert
+    } catch (error) {
+      set({ 
+        error: error instanceof Error ? error.message : 'Failed to delete document',
+        loading: false 
+      })
       throw error
     }
   },
 
   updateDocumentInStore: (documentId: string, title: string, content: string) => {
-    // This function is called after the document has already been saved to the database
-    // So we just need to update the local store state
-    const { documents, currentUserId } = get()
-    if (currentUserId) { // Only update if we still have a user
-      console.log('Updating document in store:', { documentId, title, content: content.substring(0, 50) + '...' })
-      set({
-        documents: documents.map(doc => 
-          doc.id === documentId 
-            ? { ...doc, title, content, updated_at: new Date().toISOString() }
-            : doc
-        )
-      })
-    }
+    const { documents } = get()
+    set({
+      documents: documents.map(doc => 
+        doc.id === documentId 
+          ? { ...doc, title, content, updated_at: new Date().toISOString() }
+          : doc
+      )
+    })
   },
 
   setDocuments: (documents: Document[]) => {
-    const { currentUserId } = get()
-    // Allow setting documents if no user is set yet (initial load) or if user matches
-    if (currentUserId === null || currentUserId) {
-      set({ documents })
-    }
+    set({ documents })
   },
   
   setLoading: (loading: boolean) => {
-    const { currentUserId } = get()
-    // Allow setting loading state during initial load or when user is set
-    if (currentUserId === null || currentUserId) {
-      set({ loading })
-    }
+    set({ loading })
   },
   
   setError: (error: string | null) => {
-    const { currentUserId } = get()
-    // Allow setting error state during initial load or when user is set
-    if (currentUserId === null || currentUserId) {
-      set({ error })
-    }
-  },
-  
-  clearStore: () => set({ 
-    documents: [], 
-    loading: false, 
-    error: null, 
-    currentUserId: null 
-  }),
-  
-  setCurrentUserId: (userId: string | null) => {
-    const { currentUserId } = get()
-    // If user changed, clear the store
-    if (currentUserId && currentUserId !== userId) {
-      set({ 
-        documents: [], 
-        loading: false, 
-        error: null, 
-        currentUserId: userId 
-      })
-    } else {
-      set({ currentUserId: userId })
-    }
+    set({ error })
   },
 
   setCurrentDocument: (document: Document) => {
-    set({ currentDocument: document, currentTitle: document.title, currentContent: document.content })
+    set({ 
+      currentDocument: document, 
+      currentTitle: document.title, 
+      currentContent: document.content,
+      contentChangeCount: 0
+    })
   },
 
   updateCurrentTitle: (title: string) => {
@@ -195,11 +154,6 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
   },
 
   updateCurrentContent: (content: string) => {
-    console.log('DocumentStore - Updating content:', {
-      contentLength: content.length,
-      contentPreview: content.substring(0, 100) + '...',
-      timestamp: new Date().toISOString()
-    })
     set({ currentContent: content })
   },
 
@@ -207,20 +161,14 @@ export const useDocumentStore = create<DocumentStore>((set, get) => ({
     const { currentContent, contentChangeCount } = get()
     if (!currentContent) return
     
-    console.log('Store: Replacing word:', originalWord, 'with:', replacement)
-    
-    // Create a regex to find the word with word boundaries
     const regex = new RegExp(`\\b${originalWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
     const updatedContent = currentContent.replace(regex, replacement)
     
     if (updatedContent !== currentContent) {
-      console.log('Store: Content updated with replacement')
       set({ 
         currentContent: updatedContent,
-        contentChangeCount: contentChangeCount + 1 // Increment to trigger reactivity
+        contentChangeCount: contentChangeCount + 1
       })
-    } else {
-      console.log('Store: No changes made - word not found')
     }
   },
 

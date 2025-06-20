@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { FileText, Edit, Plus } from "lucide-react"
+import { FileText, Edit, Plus, RefreshCw } from "lucide-react"
 import { useDocumentStore, Document } from '@/lib/stores/document-store'
 import { DeleteDocumentButton } from './delete-document-button'
 import Link from "next/link"
@@ -20,10 +20,9 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
     error, 
     fetchDocuments, 
     addDocument, 
-    setDocuments,
-    setCurrentUserId,
-    currentUserId
+    setDocuments
   } = useDocumentStore()
+  
   const isMountedRef = useRef(true)
 
   // Cleanup on unmount
@@ -33,25 +32,14 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
     }
   }, [])
 
-  // Handle user changes - this should happen first
+  // Initialize with server data if we don't have any documents
   useEffect(() => {
-    if (userId && isMountedRef.current) {
-      setCurrentUserId(userId)
-    }
-  }, [userId, setCurrentUserId])
-
-  // Initialize store with server-side data after user is set
-  useEffect(() => {
-    if (
-      isMountedRef.current && 
-      userId && 
-      (currentUserId === userId || currentUserId === null) && // Allow initialization if user matches or not set yet
-      documents.length === 0 &&
-      initialDocuments.length >= 0
-    ) {
+    if (documents.length === 0 && initialDocuments.length > 0) {
       setDocuments(initialDocuments)
+    } else if (documents.length === 0 && !loading) {
+      fetchDocuments()
     }
-  }, [initialDocuments, documents.length, setDocuments, userId, currentUserId])
+  }, [documents.length, initialDocuments, setDocuments, fetchDocuments, loading])
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -129,8 +117,12 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
         
         plainText = plainText.trim()
         
+        // If we successfully parsed JSON but got no meaningful text, it's an empty document
         if (plainText.length > 0) {
           return plainText.length > 100 ? plainText.substring(0, 100) + '...' : plainText
+        } else {
+          // This handles cases like {"type":"doc","content":[{"type":"paragraph"}]}
+          return 'Empty document'
         }
       }
     } catch (e) {
@@ -153,6 +145,9 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
     await fetchDocuments()
   }
 
+  // Show loading state only if we're loading and have no documents
+  const isLoading = loading && documents.length === 0
+
   if (error) {
     return (
       <Card className="bg-[#222] border-gray-700">
@@ -173,15 +168,26 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
     <>
       {/* Header with Create Button */}
       <div className="flex items-center justify-between mb-8">
-        <div>
-          <h2 className="text-2xl font-semibold">Your Documents</h2>
-          <p className="text-gray-400 mt-1">
-            {loading ? 'Loading...' : documents.length === 0 ? 'No documents yet' : `${documents.length} document${documents.length !== 1 ? 's' : ''}`}
-          </p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold">Your Documents</h2>
+            <p className="text-gray-400 mt-1">
+              {isLoading ? 'Loading...' : documents.length === 0 ? 'No documents yet' : `${documents.length} document${documents.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+          <Button
+            onClick={handleTryAgain}
+            disabled={isLoading}
+            size="sm"
+            variant="outline"
+            className="border-gray-600 hover:bg-gray-700"
+          >
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
         <Button 
           onClick={handleCreateDocument}
-          disabled={loading}
+          disabled={isLoading}
           size="lg" 
           className="bg-[#2b725e] hover:bg-[#235e4c]"
         >
@@ -191,7 +197,7 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
       </div>
 
       {/* Documents Grid */}
-      {documents.length === 0 && !loading ? (
+      {documents.length === 0 && !isLoading ? (
         <Card className="bg-[#222] border-gray-700">
           <CardContent className="p-12">
             <div className="text-center text-gray-400">
@@ -200,7 +206,7 @@ export function DocumentsGrid({ initialDocuments, userId }: DocumentsGridProps) 
               <p className="text-gray-500 mb-6">Create your first API documentation to get started</p>
               <Button 
                 onClick={handleCreateDocument}
-                disabled={loading}
+                disabled={isLoading}
                 size="lg" 
                 className="bg-[#2b725e] hover:bg-[#235e4c] px-8 py-3"
               >

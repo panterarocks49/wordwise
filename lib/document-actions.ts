@@ -22,7 +22,7 @@ export async function createDocument() {
     .from("documents")
     .insert({
       title: "Untitled Document",
-      content: "# Welcome to Lucid Docs\n\nStart writing your API documentation here...",
+      content: "",
       user_id: user.id,
     })
     .select()
@@ -33,8 +33,8 @@ export async function createDocument() {
     throw new Error("Failed to create document")
   }
 
-  // Redirect to the new document
-  redirect(`/dashboard/documents/${document.id}`)
+  // Return the document instead of redirecting
+  return document
 }
 
 export async function updateDocument(documentId: string, title: string, content: string) {
