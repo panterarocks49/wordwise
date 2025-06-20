@@ -530,32 +530,106 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, onFocusChange, 
     ]
   }, [onSpellCheckUpdate, onFocusChange])
 
+  const handleChange = useCallback((parameter: any) => {
+    // Use JSON serialization to preserve CodeMirror language attributes
+    const json = parameter.helpers.getJSON(parameter.state)
+    
+    // Custom function to preserve empty paragraphs in JSON
+    const preserveEmptyParagraphs = (node: any): any => {
+      if (!node || typeof node !== 'object') return node
+      
+      if (Array.isArray(node)) {
+        return node.map(preserveEmptyParagraphs)
+      }
+      
+      const result = { ...node }
+      
+      // If this is a paragraph with no content, add a placeholder
+      if (result.type === 'paragraph' && (!result.content || result.content.length === 0)) {
+        result.content = [{ type: 'text', text: '\u00A0' }] // Non-breaking space
+        result._isEmpty = true // Mark as originally empty for reconstruction
+      }
+      
+      // Recursively process content
+      if (result.content && Array.isArray(result.content)) {
+        result.content = result.content.map(preserveEmptyParagraphs)
+      }
+      
+      return result
+    }
+    
+    const preservedJson = preserveEmptyParagraphs(json)
+    onChange(JSON.stringify(preservedJson))
+  }, [onChange])
+
   const { manager, state } = useRemirror({ 
     extensions, 
     content: (() => {
       if (!content) return undefined
       
-      // Try to parse as JSON first (for saved Remirror content)
+      // Try to parse as JSON first (for both legacy and new format)
       try {
         const parsed = JSON.parse(content)
         // Check if it looks like a Remirror JSON document
         if (parsed && typeof parsed === 'object' && parsed.type) {
-          return parsed
+          console.log('Loading content as JSON')
+          
+          // Custom function to restore empty paragraphs from JSON
+          const restoreEmptyParagraphs = (node: any): any => {
+            if (!node || typeof node !== 'object') return node
+            
+            if (Array.isArray(node)) {
+              return node.map(restoreEmptyParagraphs)
+            }
+            
+            const result = { ...node }
+            
+            // If this is a paragraph marked as originally empty, restore it
+            if (result.type === 'paragraph' && result._isEmpty) {
+              delete result._isEmpty
+              result.content = [] // Remove the placeholder content
+            }
+            
+            // Recursively process content
+            if (result.content && Array.isArray(result.content)) {
+              result.content = result.content.map(restoreEmptyParagraphs)
+            }
+            
+            return result
+          }
+          
+          return restoreEmptyParagraphs(parsed)
         }
       } catch (e) {
         // Not JSON, continue to treat as string
       }
       
-      // Fallback to treating as string content (markdown/HTML/plain text)
+      // For HTML/markdown content, use HTML handler
+      console.log('Loading content as HTML/text')
       return content
     })(),
     stringHandler: 'html', // Use HTML handler for string content
   })
 
-  const handleChange = useCallback((parameter: any) => {
-    const json = parameter.helpers.getJSON(parameter.state)
-    onChange(JSON.stringify(json))
-  }, [onChange])
+  // Trigger initial spell check after manager is ready and has content
+  useEffect(() => {
+    if (manager && spellCheckExtensionRef.current && content) {
+      // Wait for the editor to be fully initialized
+      const timer = setTimeout(() => {
+        const view = manager.view
+        if (view && view.state.doc.content.size > 0) {
+          console.log('🔧 Triggering initial spell check on document load')
+          // Get the spell check extension and trigger initial check
+          const spellCheckExt = spellCheckExtensionRef.current
+          if (spellCheckExt && typeof spellCheckExt.triggerInitialSpellCheck === 'function') {
+            spellCheckExt.triggerInitialSpellCheck()
+          }
+        }
+      }, 500) // Give the editor time to fully initialize
+
+      return () => clearTimeout(timer)
+    }
+  }, [manager, content])
 
   // Expose spell check methods through ref
   useImperativeHandle(editorRef, () => ({
@@ -573,6 +647,9 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, onFocusChange, 
     },
     toggleCategory: (category: ErrorCategory) => {
       spellCheckExtensionRef.current?.toggleCategory(category)
+    },
+    triggerInitialSpellCheck: () => {
+      spellCheckExtensionRef.current?.triggerInitialSpellCheck()
     },
     getMisspelledWords: () => {
       const words = spellCheckExtensionRef.current?.getMisspelledWords() || []
@@ -617,6 +694,7 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, onFocusChange, 
             position: relative;
             spellcheck: false !important;
             box-shadow: none !important;
+            white-space: pre-wrap; /* Preserve whitespace for better newline handling */
           }
           
           .remirror-theme .ProseMirror {
@@ -624,8 +702,15 @@ function RemirrorEditor({ content, onChange, onSpellCheckUpdate, onFocusChange, 
           }
           
           .ProseMirror p {
-            margin: 0 0 1em 0;
+
             color: hsl(var(--foreground)) !important;
+            min-height: 1.6em; /* Match line-height - ensures empty paragraphs are visible */
+          }
+          
+          /* Ensure empty paragraphs (line breaks) are visible */
+          .ProseMirror p:empty::before {
+            content: "\\00a0"; /* Non-breaking space */
+            color: transparent;
           }
           
           .ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 {
