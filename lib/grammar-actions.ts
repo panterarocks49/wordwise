@@ -69,7 +69,7 @@ export async function checkGrammarWithAI(text: string): Promise<GrammarError[]> 
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-nano",
       messages: [
         {
           role: "system",

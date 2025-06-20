@@ -327,7 +327,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         return []
       }
 
-      console.log('🤖 AI Grammar: Found', grammarErrors.length, 'errors')
+      console.log('🤖 AI Grammar: Found', grammarErrors)
       
       // Transform OpenAI response to MisspelledWord format
       const transformStartTime = performance.now()
