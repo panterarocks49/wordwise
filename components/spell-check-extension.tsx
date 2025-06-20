@@ -21,6 +21,7 @@ import retextPassive from 'retext-passive'
 import retextPos from 'retext-pos'
 import retextSyntaxUrls from 'retext-syntax-urls'
 import retextSyntaxMentions from 'retext-syntax-mentions'
+import { checkGrammarWithAI } from '@/lib/grammar-actions'
 
 export type ErrorCategory = 'correctness' | 'clarity'
 
@@ -215,6 +216,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
 
   // New AI-powered grammar checking function (debounced by 300ms)
   private debouncedAiGrammarCheck = debounce(async (doc: any, cursorPos: number) => {
+    const pipelineStartTime = performance.now()
     const enabled = this.options.enabled ?? true
 
     if (!enabled) {
@@ -224,38 +226,50 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     try {
       const currentParagraph = this.getCurrentParagraph(doc, cursorPos)
       if (!currentParagraph) {
+        const totalDuration = performance.now() - pipelineStartTime
+        console.log(`🤖 AI Grammar: No paragraph found (${totalDuration.toFixed(2)}ms)`)
         return
       }
 
-      console.log('🤖 AI Grammar: [STUB] Would send to GPT-4.1 nano:', currentParagraph.text)
+      console.log('🤖 AI Grammar: Processing paragraph:', currentParagraph.text.substring(0, 50) + '...')
 
       // Check cache first
+      const cacheStartTime = performance.now()
       const textHash = this.hashText(currentParagraph.text)
       const cached = this.aiCache.get(currentParagraph.position.from.toString())
       const cacheExpiry = 5 * 60 * 1000 // 5 minutes
       
       if (cached && cached.hash === textHash && Date.now() - cached.timestamp < cacheExpiry) {
+        const cacheDuration = performance.now() - cacheStartTime
+        const totalDuration = performance.now() - pipelineStartTime
+        console.log(`🤖 AI Grammar: Cache hit! (cache: ${cacheDuration.toFixed(2)}ms, total: ${totalDuration.toFixed(2)}ms)`)
         await this.processAiSuggestions(cached.suggestions)
         return
       }
 
-      // Simulate async GPT call delay
-      await new Promise(resolve => setTimeout(resolve, 100))
+      const cacheDuration = performance.now() - cacheStartTime
+      console.log(`🤖 AI Grammar: Cache miss (${cacheDuration.toFixed(2)}ms)`)
       
-      // TODO: Replace this stub with actual GPT-4.1 nano API call
+      // Call OpenAI API
       const aiSuggestions = await this.callGptBackend(currentParagraph.text, currentParagraph.position)
       
       // Cache the results
+      const cacheStoreStartTime = performance.now()
       this.aiCache.set(currentParagraph.position.from.toString(), {
         hash: textHash,
         suggestions: aiSuggestions,
         timestamp: Date.now()
       })
+      const cacheStoreDuration = performance.now() - cacheStoreStartTime
 
       await this.processAiSuggestions(aiSuggestions)
 
+      const totalDuration = performance.now() - pipelineStartTime
+      console.log(`🤖 AI Grammar: Pipeline completed in ${totalDuration.toFixed(2)}ms (cache store: ${cacheStoreDuration.toFixed(2)}ms)`)
+
     } catch (error) {
-      console.error('🤖 AI Grammar: Error in AI grammar check:', error)
+      const totalDuration = performance.now() - pipelineStartTime
+      console.error(`🤖 AI Grammar: Pipeline error after ${totalDuration.toFixed(2)}ms:`, error)
     }
   }, 300) // 300ms debounce as requested
 
@@ -293,16 +307,125 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
     return currentParagraph
   }
 
-  // Stub for GPT backend call - will be implemented later
+  // Call OpenAI API for grammar checking
   private async callGptBackend(text: string, position: { from: number, to: number }): Promise<MisspelledWord[]> {
-    // TODO: Implement actual GPT-4.1 nano API call here
-    // This is just a placeholder that returns empty suggestions
+    const startTime = performance.now()
     
-    // Simulate some processing time
-    await new Promise(resolve => setTimeout(resolve, 50))
+    try {
+      console.log('🤖 AI Grammar: Checking text with OpenAI:', text.substring(0, 50) + '...')
+      
+      // Call the server action for AI grammar checking
+      const apiStartTime = performance.now()
+      const grammarErrors = await checkGrammarWithAI(text)
+      const apiDuration = performance.now() - apiStartTime
+      
+      console.log(`🤖 AI Grammar: OpenAI API call completed in ${apiDuration.toFixed(2)}ms`)
+      
+      if (grammarErrors.length === 0) {
+        const totalDuration = performance.now() - startTime
+        console.log(`🤖 AI Grammar: No errors found (total: ${totalDuration.toFixed(2)}ms)`)
+        return []
+      }
+
+      console.log('🤖 AI Grammar: Found', grammarErrors.length, 'errors')
+      
+      // Transform OpenAI response to MisspelledWord format
+      const transformStartTime = performance.now()
+      const potentialWords = grammarErrors
+        .map((error, index) => {
+          // Map character positions from paragraph to document positions
+          const documentFrom = position.from + 1 + error.start // +1 for paragraph node
+          const documentTo = position.from + 1 + error.end
+          
+          // Validate positions
+          if (documentFrom < position.from || documentTo > position.to || documentFrom >= documentTo) {
+            console.warn('🤖 AI Grammar: Invalid position for error:', error)
+            return null
+          }
+          
+          // Extract the actual word from the text
+          const word = text.substring(error.start, error.end)
+          
+          // Determine category based on error type
+          const category: ErrorCategory = this.categorizeAiError(error.type)
+          
+          // Determine severity based on error type
+          const severity = this.getAiErrorSeverity(error.type)
+          
+          const misspelledWord: MisspelledWord = {
+            word,
+            suggestions: [error.suggestion], // OpenAI provides one suggestion per error
+            position: { from: documentFrom, to: documentTo },
+            category,
+            ruleId: `ai-${error.type.toLowerCase().replace(/\s+/g, '-')}`,
+            message: error.description,
+            severity,
+            source: 'ai'
+          }
+          
+          return misspelledWord
+        })
+      
+      // Filter out null entries and return valid MisspelledWord array
+      const misspelledWords: MisspelledWord[] = potentialWords.filter((word): word is MisspelledWord => word !== null)
+      
+      const transformDuration = performance.now() - transformStartTime
+      const totalDuration = performance.now() - startTime
+      
+      console.log(`🤖 AI Grammar: Transform completed in ${transformDuration.toFixed(2)}ms`)
+      console.log(`🤖 AI Grammar: Total processing time: ${totalDuration.toFixed(2)}ms (API: ${apiDuration.toFixed(2)}ms, Transform: ${transformDuration.toFixed(2)}ms)`)
+      
+      return misspelledWords
+      
+    } catch (error) {
+      const totalDuration = performance.now() - startTime
+      console.error(`🤖 AI Grammar: Error after ${totalDuration.toFixed(2)}ms:`, error)
+      return []
+    }
+  }
+
+  // Helper method to categorize AI errors
+  private categorizeAiError(errorType: string): ErrorCategory {
+    const correctnessTypes = [
+      'spelling', 'punctuation', 'capitalization', 'grammar', 'subject-verb agreement',
+      'verb form', 'tense', 'pronoun', 'article', 'preposition'
+    ]
     
-    // Return empty suggestions for now
-    return []
+    const clarityTypes = [
+      'word choice', 'clarity', 'conciseness', 'redundancy', 'passive voice',
+      'readability', 'style', 'flow', 'coherence'
+    ]
+    
+    const lowerType = errorType.toLowerCase()
+    
+    if (correctnessTypes.some(type => lowerType.includes(type))) {
+      return 'correctness'
+    }
+    
+    if (clarityTypes.some(type => lowerType.includes(type))) {
+      return 'clarity'
+    }
+    
+    // Default to correctness for unknown types
+    return 'correctness'
+  }
+
+  // Helper method to determine severity of AI errors
+  private getAiErrorSeverity(errorType: string): 'error' | 'warning' | 'info' {
+    const errorTypes = ['spelling', 'grammar', 'subject-verb agreement', 'verb form']
+    const warningTypes = ['punctuation', 'word choice', 'clarity', 'style']
+    
+    const lowerType = errorType.toLowerCase()
+    
+    if (errorTypes.some(type => lowerType.includes(type))) {
+      return 'error'
+    }
+    
+    if (warningTypes.some(type => lowerType.includes(type))) {
+      return 'warning'
+    }
+    
+    return 'info'
   }
 
   // Process AI suggestions and merge with existing decorations
