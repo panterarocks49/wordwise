@@ -473,8 +473,8 @@ export default function DocumentEditor({ document }: DocumentEditorProps) {
         variant="ghost"
         size="sm"
         onClick={toggleSpellCheckSidebar}
-        className={`fixed top-3 z-50 h-12 w-8 rounded-l-lg rounded-r-none bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 border-r-0 transition-all duration-300 ${
-          spellCheckSidebarOpen ? 'right-[26rem]' : 'right-0'
+        className={`fixed top-4 z-50 h-10 w-8 rounded-l-lg rounded-r-none bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 border-r-0 transition-all duration-300 ${
+          spellCheckSidebarOpen ? 'right-[32rem]' : 'right-0'
         }`}
       >
         {spellCheckSidebarOpen ? (

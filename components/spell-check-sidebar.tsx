@@ -3,9 +3,7 @@
 import { useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   ChevronLeft,
   ChevronRight,
@@ -183,18 +181,18 @@ export function SpellCheckSidebar({
         onClick={() => handleItemClick(wordData, index)}
       >
         {!isExpanded && (
-          <div className="p-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="p-3 flex items-center justify-between min-w-0">
+            <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
               <span className={`${config.color} font-medium text-sm truncate`}>
                 {wordData.word}
               </span>
               {getSeverityIcon(wordData.severity)}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Badge variant="outline" className="text-xs px-2 py-0 h-5 truncate max-w-20">
+              <Badge variant="outline" className="text-xs px-2 py-0 h-5 truncate max-w-24">
                 {wordData.ruleId}
               </Badge>
-              <ChevronDown className="h-4 w-4 text-gray-400" />
+              <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
             </div>
           </div>
         )}
@@ -202,22 +200,22 @@ export function SpellCheckSidebar({
         {isExpanded && (
           <div className="p-3">
             <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className={`${config.color} font-medium text-sm`}>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className={`${config.color} font-medium text-sm truncate`}>
                   {wordData.word}
                 </span>
                 {getSeverityIcon(wordData.severity)}
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-xs px-2 py-0 h-5">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <Badge variant="outline" className="text-xs px-2 py-0 h-5 truncate max-w-24">
                   {wordData.ruleId}
                 </Badge>
-                <ChevronUp className="h-4 w-4 text-gray-400" />
+                <ChevronUp className="h-4 w-4 text-gray-400 flex-shrink-0" />
               </div>
             </div>
 
             {wordData.message && (
-              <div className="mb-2 text-xs text-gray-400">
+              <div className="mb-2 text-xs text-gray-400 break-words">
                 {wordData.message}
               </div>
             )}
@@ -230,7 +228,7 @@ export function SpellCheckSidebar({
                       key={suggestionIndex}
                       variant="outline"
                       size="sm"
-                      className="text-xs h-5 px-2 py-0 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600"
+                      className="text-xs h-5 px-2 py-0 bg-gray-700/50 hover:bg-gray-600 text-gray-300 hover:text-white border-gray-600 truncate max-w-32"
                       onClick={(e) => {
                         e.stopPropagation()
                         handleSuggestionReplace(wordData, suggestion, index)
@@ -290,65 +288,13 @@ export function SpellCheckSidebar({
     )
   }
 
-  const renderTabContent = (category: ErrorCategory) => {
-    const words = categorizedErrors[category] || []
-    const config = categoryConfig[category]
-    const isEnabled = categoryStates[category]
-
-    if (!isEnabled) {
-      return (
-        <div className="p-4 text-center">
-          <div className={`${config.color} mb-2`}>
-            <config.icon className="h-8 w-8 mx-auto" />
-          </div>
-          <p className="text-gray-400 text-sm mb-3">
-            {config.label} analysis is disabled
-          </p>
-          {onToggleCategory && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => onToggleCategory(category)}
-              className="text-xs"
-            >
-              Enable {config.label}
-            </Button>
-          )}
-        </div>
-      )
-    }
-
-    if (words.length === 0) {
-      return (
-        <div className="p-4 text-center">
-          <div className="text-green-400 mb-2">
-            <Check className="h-8 w-8 mx-auto" />
-          </div>
-          <p className="text-green-400 text-sm">
-            No {category} issues found!
-          </p>
-        </div>
-      )
-    }
-
-    return (
-      <div className="h-full overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="p-3 space-y-3">
-            {words.map((wordData, index) => renderWordCard(wordData, index))}
-          </div>
-        </ScrollArea>
-      </div>
-    )
-  }
-
   return (
     <div className={`bg-[#161616] border-l border-gray-800 transition-all duration-300 ease-in-out ${
-      isOpen ? 'w-[26rem]' : 'w-0'
+      isOpen ? 'w-[32rem]' : 'w-0'
     } flex flex-col overflow-hidden h-screen`}>
       {isOpen && (
         <>
-          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col overflow-hidden">
             {error ? (
               <div className="p-4 text-red-400 text-sm">
                 <AlertCircle className="h-4 w-4 inline mr-2" />
@@ -360,72 +306,108 @@ export function SpellCheckSidebar({
                 Analyzing text...
               </div>
             ) : (
-              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ErrorCategory)} className="h-full flex flex-col min-h-0">
-                <div className="border-b border-gray-700 bg-gray-800/30 flex-shrink-0">
-                  <div className="flex">
-                    {Object.entries(categoryConfig).map(([key, config]) => {
-                      const category = key as ErrorCategory
-                      const count = categorizedErrors[category]?.length || 0
-                      const isEnabled = categoryStates[category]
-                      const isActive = activeTab === category
-                      
-                      return (
-                        <button
-                          key={key}
-                          onClick={() => setActiveTab(category)}
-                          className={`flex-1 px-4 py-3 text-sm font-medium relative transition-all duration-200 ${
-                            isActive 
-                              ? 'text-white bg-gray-700/50' 
-                              : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
-                          } ${!isEnabled ? 'opacity-50' : ''}`}
-                        >
-                          <div className="flex items-center justify-center gap-2">
-                            <config.icon className="h-4 w-4 flex-shrink-0" />
-                            <span className="truncate">{config.label}</span>
-                            {count > 0 && (
-                              <Badge variant="secondary" className="h-4 min-w-4 px-1.5 text-xs bg-gray-600 text-gray-200">
-                                {count}
-                              </Badge>
-                            )}
-                          </div>
-                          
-                          {isActive && (
-                            <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${
-                              category === 'correctness' ? 'bg-red-400' : 'bg-purple-400'
-                            }`} />
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Tab Headers */}
+                <div className="border-b border-gray-700 bg-gray-800/30 flex">
+                  {Object.entries(categoryConfig).map(([key, config]) => {
+                    const category = key as ErrorCategory
+                    const count = categorizedErrors[category]?.length || 0
+                    const isEnabled = categoryStates[category]
+                    const isActive = activeTab === category
+                    
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setActiveTab(category)}
+                        disabled={!isEnabled}
+                        className={`flex-1 px-4 py-3 text-sm font-medium relative transition-all duration-200 ${
+                          isActive 
+                            ? 'text-white bg-gray-700/50' 
+                            : 'text-gray-400 hover:text-gray-300 hover:bg-gray-800/50'
+                        } ${!isEnabled ? 'opacity-50' : ''}`}
+                      >
+                        <div className="flex items-center justify-center gap-2">
+                          <config.icon className="h-4 w-4" />
+                          <span>{config.label}</span>
+                          {count > 0 && (
+                            <Badge variant="secondary" className="h-4 min-w-4 px-1.5 text-xs bg-gray-600 text-gray-200">
+                              {count}
+                            </Badge>
                           )}
-                          
-                          {onToggleCategory && (
-                            <div
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                onToggleCategory(category)
-                              }}
-                              className={`absolute top-1 right-1 w-2 h-2 rounded-full cursor-pointer transition-colors ${
-                                isEnabled
-                                  ? 'bg-green-400'
-                                  : 'bg-gray-500'
-                              }`}
-                            />
-                          )}
-                        </button>
-                      )
-                    })}
-                  </div>
+                        </div>
+                        
+                        {isActive && (
+                          <div className={`absolute bottom-0 left-0 right-0 h-0.5 ${
+                            category === 'correctness' ? 'bg-red-400' : 'bg-purple-400'
+                          }`} />
+                        )}
+                        
+                        {onToggleCategory && (
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onToggleCategory(category)
+                            }}
+                            className={`absolute top-1 right-1 w-2 h-2 rounded-full cursor-pointer transition-colors ${
+                              isEnabled ? 'bg-green-400' : 'bg-gray-500'
+                            }`}
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
 
-                <div className="flex-1 overflow-hidden min-h-0">
-                  {Object.keys(categoryConfig).map((key) => (
-                    <TabsContent
-                      key={key}
-                      value={key}
-                      className="h-full m-0 p-0 data-[state=active]:flex data-[state=active]:flex-col"
-                    >
-                      {renderTabContent(key as ErrorCategory)}
-                    </TabsContent>
-                  ))}
+                {/* Tab Content */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {(() => {
+                    const category = activeTab
+                    const words = categorizedErrors[category] || []
+                    const config = categoryConfig[category]
+                    const isEnabled = categoryStates[category]
+
+                    if (!isEnabled) {
+                      return (
+                        <div className="flex flex-col items-center justify-center p-4 text-center">
+                          <config.icon className={`h-8 w-8 mb-2 ${config.color}`} />
+                          <p className="text-gray-400 text-sm mb-3">
+                            {config.label} analysis is disabled
+                          </p>
+                          {onToggleCategory && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onToggleCategory(category)}
+                              className="text-xs"
+                            >
+                              Enable {config.label}
+                            </Button>
+                          )}
+                        </div>
+                      )
+                    }
+
+                    if (words.length === 0) {
+                      return (
+                        <div className="flex flex-col items-center justify-center p-4 text-center">
+                          <Check className="h-8 w-8 mb-2 text-green-400" />
+                          <p className="text-green-400 text-sm">
+                            No {category} issues found!
+                          </p>
+                        </div>
+                      )
+                    }
+
+                    return (
+                      <div className="flex-1 overflow-y-auto">
+                        <div className="flex flex-col gap-3 p-3">
+                          {words.map((wordData, index) => renderWordCard(wordData, index))}
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
-              </Tabs>
+              </div>
             )}
           </div>
         </>

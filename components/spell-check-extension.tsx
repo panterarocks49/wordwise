@@ -13,7 +13,6 @@ import retextIndefiniteArticle from 'retext-indefinite-article'
 import retextQuotes from 'retext-quotes'
 import retextSentenceSpacing from 'retext-sentence-spacing'
 import retextSmartypants from 'retext-smartypants'
-import retextIntensify from 'retext-intensify'
 import retextSimplify from 'retext-simplify'
 import retextRedundantAcronyms from 'retext-redundant-acronyms'
 import retextRepeatedWords from 'retext-repeated-words'
@@ -60,7 +59,6 @@ const categoryMappings: Record<string, { category: ErrorCategory; severity: 'err
   'retext-smartypants': { category: 'correctness', severity: 'info' },
   
   // Clarity - conciseness, readability, style
-  'retext-intensify': { category: 'clarity', severity: 'warning' },
   'retext-simplify': { category: 'clarity', severity: 'warning' },
   'retext-redundant-acronyms': { category: 'clarity', severity: 'warning' },
   'retext-repeated-words': { category: 'clarity', severity: 'warning' },
@@ -158,7 +156,6 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
         .use(retextSmartypants)
         
         // Clarity plugins
-        .use(retextIntensify)
         .use(retextSimplify)
         .use(retextRedundantAcronyms)
         .use(retextRepeatedWords)
@@ -218,7 +215,7 @@ export class SpellCheckExtension extends PlainExtension<SpellCheckOptions> {
   // Test the spell checker with some sample words
   private async testSpellChecker() {
     try {
-      const testText = 'This is a test with a mispelled word and some weasel words like "very" and "really". We should utilize this instead of use this. The ATM machine is over there.'
+      const testText = 'This is a test with a mispelled word and some weasel words. We should utilize this instead of use this. The ATM machine is over there.'
       const file = await this.spellChecker.process(testText)
       
       console.log('🔍 SpellCheck: Testing comprehensive spell checker:', {
